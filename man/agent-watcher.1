@@ -1,0 +1,73 @@
+.TH AGENT-WATCH 1 "2026-09-09" "agent-watcher" "User Commands"
+.SH NAME
+agent-watch \- notify which agent tab needs input
+.SH SYNOPSIS
+.B agent-watch
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B agent-watch
+is a daemon that watches coding agents and emits a desktop notification
+naming the exact workspace/tab/agent that needs attention, so you know which
+tab to look at when several agents or LLM harnesses are running at once.
+.PP
+It has two sources:
+.TP
+.B herdr
+Polls \fBherdr api snapshot\fR and notifies when a background (non-focused)
+agent pane transitions to a needs-attention state: \fBblocked\fR (approval or
+question UI), \fBdone\fR (background work finished), or \fBidle\fR while
+unfocused (ready for input).
+.TP
+.B external
+Finds known coding-agent processes running outside herdr (controlling tty not
+owned by a herdr pane) and notifies when one appears and its terminal goes
+idle. Best-effort heuristic; unvalidated against a live standalone instance.
+.PP
+The pane you are already looking at is skipped, and notifications are
+deduplicated per episode.
+.SH OPTIONS
+.TP
+.B \-\-herdr-bin \fIPATH\fR
+Path to the herdr CLI (default: \fBherdr\fR).
+.TP
+.B \-\-notify-cmd \fICMD\fR
+Notification command (default: \fBnotify-send\fR).
+.TP
+.B \-\-interval \fISECONDS\fR
+herdr poll interval (default: 2.0).
+.TP
+.B \-\-external-interval \fISECONDS\fR
+External scan interval (default: 5.0).
+.TP
+.B \-\-idle-threshold \fISECONDS\fR
+External tty idle seconds before "needs input" (default: 10.0).
+.TP
+.B \-\-once
+Single pass, then exit (for smoke tests).
+.TP
+.B \-\-dry-run
+Print notifications instead of sending them.
+.TP
+.B \-h, \-\-help
+Show help and exit.
+.SH EXAMPLES
+.TP
+Print what it would notify right now
+.B agent-watch \-\-once \-\-dry-run
+.TP
+Send one real pass of notifications
+.B agent-watch \-\-once
+.TP
+Poll faster
+.B agent-watch \-\-interval 1
+.SH FILES
+.TP
+.I ~/projects/agent-watcher/agent-watch
+The daemon source.
+.TP
+.I ~/.config/systemd/user/agent-watch.service
+The systemd user unit.
+.SH SEE ALSO
+.BR herdr (1)
+.SH AUTHOR
+Written for the Oh My Pi harness user.
