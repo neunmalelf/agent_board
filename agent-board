@@ -1,0 +1,611 @@
+#!/usr/bin/env python3
+"""agent-board — a live status board for coding agents.
+
+Agents running under herdr (or in any shell) register themselves and post a
+one-line status of what they are doing, updating it until the task is closed:
+
+  agent-board note register -m "refactoring auth module"
+  agent-board note step     -m "todo 2/5: rewrite token refresh"
+  agent-board note update   -m "running pytest -k auth"
+  agent-board note done     -m "PR #12 opened, tests green"
+  agent-board note stop                     # leave the board
+
+Each agent is one vertical column; the column header is the agent's herdr
+tab title ("project name"), captured at register time. herdr's api snapshot
+is the source of truth for liveness: a column disappears the moment the
+agent's pane closes. Cards carry the free-text progress ("what is it doing",
+"what has it done"). Agents outside herdr get a column too; it disappears on
+`note stop` or after --stale-seconds without an update.
+
+Run `agent-board` for the fullscreen TUI; `agent-board --once` prints a
+single frame (useful for logging or `watch`).
+"""
+import argparse
+import curses
+import glob
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import time
+
+__version__ = "1.3.202609111640Z"
+
+STATE_DIR = os.path.join(
+    os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
+    "agent-board",
+)
+FRAME_PATH = os.path.join(STATE_DIR, "board.txt")
+
+CHIP_SYMBOL = {"working": "●", "blocked": "×", "idle": "○", "done": "✓",
+               "unknown": "?", "ext": "+", "stale": "!"}
+CHIP_LABEL = {"working": "working", "blocked": "blocked", "idle": "idle",
+              "done": "done", "unknown": "unknown", "ext": "external",
+              "stale": "stale"}
+CHIP_COLOR = {"working": 1, "blocked": 2, "idle": 3, "done": 1,
+              "unknown": 4, "ext": 4, "stale": 2}
+STATUS_ORDER = {"working": 0, "blocked": 1, "unknown": 2, "ext": 3,
+                "stale": 3, "idle": 4, "done": 5}
+MAX_LOG = 24
+MAX_HEADER = 80
+MAX_MSG = 200
+SPINNER_RE = re.compile(r"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]")
+
+
+def clean_title(text):
+    """Tab title without transient spinner glyphs (agents animate one while busy)."""
+    return re.sub(r"\s{2,}", " ", SPINNER_RE.sub(" ", text or "")).strip()
+
+
+# --------------------------------------------------------------------------
+# state: one JSON card per agent under ~/.local/state/agent-board/
+# --------------------------------------------------------------------------
+
+def card_path(pane_id):
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", pane_id)
+    return os.path.join(STATE_DIR, safe + ".json")
+
+
+def read_card(path):
+    try:
+        with open(path) as f:
+            card = json.load(f)
+        return card if isinstance(card, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def load_cards():
+    cards = {}
+    try:
+        names = os.listdir(STATE_DIR)
+    except OSError:
+        return cards
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        card = read_card(os.path.join(STATE_DIR, name))
+        if card and card.get("pane_id"):
+            cards[str(card["pane_id"])] = card
+    return cards
+
+
+def save_card(card):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    path = card_path(card["pane_id"])
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(card, f)
+    os.replace(tmp, path)
+
+
+def drop_card(pane_id):
+    try:
+        os.remove(card_path(pane_id))
+    except OSError:
+        pass
+
+
+# --------------------------------------------------------------------------
+# herdr snapshot: the authoritative agent registry
+# --------------------------------------------------------------------------
+
+def herdr_agents(herdr_bin):
+    """Live agent list, or None when the snapshot is unavailable."""
+    try:
+        out = subprocess.run([herdr_bin, "api", "snapshot"],
+                             capture_output=True, text=True, timeout=10)
+        if out.returncode != 0:
+            return None
+        data = json.loads(out.stdout)
+        agents = data.get("result", {}).get("snapshot", {}).get("agents", [])
+        return agents if isinstance(agents, list) else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def herdr_match(agents, pane_id, tab_id):
+    for a in agents or []:
+        if pane_id and a.get("pane_id") == pane_id:
+            return a
+        if tab_id and a.get("tab_id") == tab_id:
+            return a
+    return None
+
+
+# --------------------------------------------------------------------------
+# agent side: `agent-board note ...`
+# --------------------------------------------------------------------------
+
+def self_pane_id():
+    env = os.environ.get("HERDR_PANE_ID")
+    if env:
+        return env
+    try:
+        tty = os.ttyname(0)
+    except (OSError, ValueError):
+        tty = None
+    if tty:
+        return "ext-" + re.sub(r"[^A-Za-z0-9._-]", "-",
+                               os.path.basename(tty)).lstrip("-")
+    return "ext-anon-%d" % os.getppid()
+
+
+def cmd_note(ns, herdr_bin):
+    pane = ns.pane or self_pane_id()
+    tab = ns.tab if ns.tab is not None else (
+        os.environ.get("HERDR_TAB_ID") or "" if ns.pane is None else "")
+    path = card_path(pane)
+    now = time.time()
+
+    if ns.action == "stop":
+        if os.path.exists(path):
+            os.remove(path)
+            print(f"agent-board: removed column {pane}")
+        else:
+            print(f"agent-board: no column for {pane}")
+        return 0
+
+    if not ns.msg:
+        print("agent-board: -m/--msg required for this action", file=sys.stderr)
+        return 2
+    msg = ns.msg.strip()[:MAX_MSG]
+
+    agents = herdr_agents(herdr_bin) or []
+    match = herdr_match(agents, pane, tab)
+    card = read_card(path)
+
+    if ns.action == "register" or card is None:
+        header = (ns.header or "").strip()
+        if not header:
+            title = clean_title(match.get("terminal_title_stripped")
+                                or match.get("terminal_title")) if match else ""
+            header = title or f"{socket.gethostname()}:{os.getcwd()}"
+        card = {"pane_id": pane, "tab_id": tab, "header": header[:MAX_HEADER],
+                "agent": ns.agent or (match or {}).get("agent") or "",
+                "herdr": ns.pane is None and bool(os.environ.get("HERDR_PANE_ID")),
+                "status": "", "log": [], "created": now, "updated": now,
+                "done": False}
+        if ns.action == "register":
+            card["log"] = [{"t": now, "k": "register", "m": msg}] if msg else []
+
+    card["status"] = msg
+    card["updated"] = now
+    if ns.header:
+        card["header"] = ns.header.strip()[:MAX_HEADER]
+    if ns.agent:
+        card["agent"] = ns.agent
+    if tab:
+        card["tab_id"] = tab
+    if ns.action in ("step", "done"):
+        card["log"] = (card.get("log") or []) + [{"t": now, "k": ns.action,
+                                                  "m": msg}]
+        card["log"] = card["log"][-MAX_LOG:]
+    if ns.action == "done":
+        card["done"] = True
+    card["pane_id"] = pane
+
+    save_card(card)
+    print(f"agent-board: [{pane}] {ns.action}: {msg}")
+    return 0
+
+
+# --------------------------------------------------------------------------
+# process info: pid + memory per agent (herdr snapshot carries no pid)
+# --------------------------------------------------------------------------
+
+AGENT_ALIASES = {
+    "omp": {"omp"}, "hermes": {"hermes"}, "opencode": {"opencode"},
+    "agy": {"agy", "antigravity", "antigravity-cli"},
+    "codex": {"codex"}, "claude": {"claude"}, "gemini": {"gemini"},
+    "amp": {"amp"}, "droid": {"droid"}, "grok": {"grok"}, "kimi": {"kimi"},
+    "cursor": {"cursor"}, "devin": {"devin"}, "qwen": {"qwen", "qwen-code"},
+    "kilo": {"kilo"}, "qoder": {"qoder"},
+}
+
+
+def rss_str(kb):
+    if kb is None:
+        return ""
+    if kb < 1024 * 1024:
+        return f"{kb // 1024}M"
+    return f"{kb / 1024 / 1024:.1f}G"
+
+
+def scan_procs():
+    """One /proc pass: (by_pts_basename, by_(comm, cwd)) of (pid, comm, rss_kb)."""
+    by_tty, by_kind = {}, {}
+    for d in glob.glob("/proc/[0-9]*"):
+        try:
+            pid = int(d.rsplit("/", 1)[-1])
+            comm = open(d + "/comm").read().strip().lower()
+            with open(d + "/status") as f:
+                rss = 0
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        rss = int(line.split()[1])
+                        break
+        except (OSError, ValueError, IndexError):
+            continue
+        if not rss:
+            continue
+        try:
+            cwd = os.readlink(d + "/cwd")
+        except OSError:
+            cwd = ""
+        try:
+            tty = os.readlink(d + "/fd/0")
+        except OSError:
+            tty = ""
+        if tty.startswith("/dev/pts/"):
+            by_tty.setdefault(tty.rsplit("/", 1)[-1], []).append((pid, comm, rss))
+        by_kind.setdefault((comm, cwd), []).append((pid, comm, rss))
+    return by_tty, by_kind
+
+
+def resolve_proc(kind, cwd, procs):
+    """Best-effort (pid, rss_kb) for a herdr agent: comm aliases + cwd match."""
+    if not procs:
+        return None, None
+    by_tty, by_kind = procs
+    names = AGENT_ALIASES.get(kind, set()) | {str(kind).lower()}
+    best = None
+    for name in names:
+        for cand in by_kind.get((name, cwd or ""), ()):
+            if best is None or cand[2] > best[2]:
+                best = cand  # the agent's main process has the largest RSS
+    return (best[0], best[2]) if best else (None, None)
+
+
+def resolve_ext_proc(pane_id, procs):
+    """ext-<pts basename> card: find the agent process holding that tty."""
+    if not procs or not pane_id.startswith("ext-"):
+        return None, None
+    known = set()
+    for names in AGENT_ALIASES.values():
+        known |= names
+    best = None
+    for pid, comm, rss in procs[0].get(pane_id[4:], []):
+        if comm in known and (best is None or rss > best[2]):
+            best = (pid, comm, rss)
+    return (best[0], best[2]) if best else (None, None)
+
+
+# --------------------------------------------------------------------------
+# viewer: merge snapshot + cards into columns
+# --------------------------------------------------------------------------
+
+def build_columns(agents, cards, now, stale_after, procs=None):
+    """Merge herdr agents (liveness) with posted cards (free text).
+
+    `agents` may be None = snapshot unavailable; herdr-owned cards are then
+    hidden (unknown liveness) but not deleted.
+    """
+    cols = []
+    for a in agents or []:
+        pane = str(a.get("pane_id") or "")
+        card = cards.get(pane) or {}
+        header = (card.get("header")
+                  or clean_title(a.get("terminal_title_stripped"))
+                  or a.get("cwd") or pane)
+        kind = a.get("agent") or card.get("agent") or "?"
+        pid, rss = resolve_proc(kind, a.get("cwd") or card.get("cwd") or "", procs)
+        cols.append({
+            "pane": pane,
+            "agent": kind,
+            "tab": str(a.get("tab_id") or card.get("tab_id") or ""),
+            "header": header[:MAX_HEADER],
+            "chip": "done" if card.get("done") else (a.get("agent_status") or "unknown"),
+            "focused": bool(a.get("focused")),
+            "text": card.get("status") or "",
+            "log": card.get("log") or [],
+            "age": (now - card["updated"]) if card.get("updated") else None,
+            "pid": pid, "rss": rss,
+        })
+
+    seen = {c["pane"] for c in cols}
+    for pane, card in cards.items():
+        if pane in seen:
+            continue
+        if card.get("herdr"):
+            continue  # herdr pane gone from snapshot = agent stopped
+        age = now - (card.get("updated") or now)
+        if card.get("done"):
+            chip = "done"
+        elif age > stale_after:
+            chip = "stale"
+        else:
+            chip = "ext"
+        pid, rss = resolve_ext_proc(pane, procs)
+        cols.append({
+            "pane": pane,
+            "agent": card.get("agent") or "external",
+            "tab": str(card.get("tab_id") or ""),
+            "header": (card.get("header") or pane)[:MAX_HEADER],
+            "chip": chip, "focused": False,
+            "text": card.get("status") or "",
+            "log": card.get("log") or [], "age": age,
+            "pid": pid, "rss": rss,
+        })
+
+    cols.sort(key=lambda c: (STATUS_ORDER.get(c["chip"], 9),
+                             c["age"] if c["age"] is not None else 1e12))
+    return cols
+
+
+def sweep(cards, agents):
+    """Delete herdr-owned cards whose pane has closed (agent stopped)."""
+    if agents is None:
+        return  # snapshot unavailable: keep everything
+    live = {str(a.get("pane_id")) for a in agents}
+    for pane, card in cards.items():
+        if card.get("herdr") and pane not in live:
+            drop_card(pane)
+
+
+def age_str(seconds):
+    if seconds is None:
+        return ""
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m"
+    return f"{int(seconds // 3600)}h{int(seconds % 3600 // 60):02d}m"
+
+
+def chip_str(col):
+    star = "*" if col["focused"] else ""
+    return f"{star}{CHIP_SYMBOL.get(col['chip'], '?')} {CHIP_LABEL[col['chip']]}"
+
+
+def meta_str(col):
+    parts = [col["agent"]]
+    if col["tab"]:
+        parts.append(col["tab"])
+    if col.get("pid"):
+        parts.append(f"pid {col['pid']}")
+    if col.get("rss"):
+        parts.append("mem " + rss_str(col["rss"]))
+    if col["age"] is not None:
+        parts.append("updated " + age_str(col["age"]))
+    return " · ".join(parts)
+
+
+# --------------------------------------------------------------------------
+# one-shot ANSI render
+# --------------------------------------------------------------------------
+
+def compact_line(col, width):
+    """One line per agent: chip, header, and its current ("now") status."""
+    s = f"[{chip_str(col)}] {col['header']}"
+    if col["text"]:
+        s += " · " + col["text"]
+    return s[:width]
+
+
+def render_frame(cols, herdr_ok, color, compact=False, width=118):
+    ansi = {1: "32", 2: "31", 3: "36", 4: "33"}
+    on = (lambda code, s: f"\x1b[{code}m{s}\x1b[0m") if color else (lambda code, s: s)
+    active = sum(1 for c in cols if c["chip"] in ("working", "blocked"))
+    head = f"agent-board · {len(cols)} agents · {active} active · {time.strftime('%H:%M:%S')}"
+    if herdr_ok is False:
+        head += " · herdr snapshot unreachable"
+    lines = [on("1", head)]
+    if compact:
+        half = max(24, (width - 3) // 2)
+        split = (len(cols) + 1) // 2
+        for i in range(split):
+            left = cols[i]
+            row = compact_line(left, half).ljust(half)
+            if split + i < len(cols):
+                right = cols[split + i]
+                row += " │ " + compact_line(right, half)
+            lines.append(row)
+        return "\n".join(lines)
+    for i, c in enumerate(cols):
+        code = ansi.get(CHIP_COLOR.get(c["chip"]), "0")
+        lines.append(on(code, f"┌─ [{chip_str(c)}] {c['header']}"))
+        lines.append("│ " + meta_str(c))
+        if c["text"]:
+            lines.append("│ " + on(code, "● ") + c["text"])
+        for e in c["log"][-4:]:
+            ts = time.strftime("%H:%M", time.localtime(e["t"]))
+            lines.append(f"│   · [{ts}] {e['k']}: {e['m']}")
+        lines.append("└")
+        if i < len(cols) - 1:
+            lines.append("")  # exactly one empty line between agents
+    return "\n".join(lines)
+
+
+def render_once(cols, herdr_ok, compact=False):
+    print(render_frame(cols, herdr_ok, color=True, compact=compact))
+
+
+# --------------------------------------------------------------------------
+# fullscreen TUI
+# --------------------------------------------------------------------------
+
+def column_lines(col, width):
+    color = CHIP_COLOR.get(col["chip"], 0)
+    attr = curses.color_pair(color) | curses.A_BOLD
+    rule = f"┌─ [{chip_str(col)}] {col['header']}"
+    lines = [(rule, attr)]
+    lines.append(("│ " + meta_str(col), curses.A_DIM))
+    if col["text"]:
+        lines.append(("│ ● " + col["text"], curses.A_BOLD))
+    for e in col["log"][-4:]:
+        ts = time.strftime("%H:%M", time.localtime(e["t"]))
+        lines.append((f"│   · [{ts}] {e['k']}: {e['m']}", curses.A_NORMAL))
+    lines.append(("└", curses.A_DIM))
+    return lines
+
+
+def run_tui(stdscr, herdr_bin, poll_period, stale_after, compact=False):
+    curses.curs_set(0)
+    curses.start_color()
+    curses.use_default_colors()
+    for pair, fg in ((1, curses.COLOR_GREEN), (2, curses.COLOR_RED),
+                     (3, curses.COLOR_CYAN), (4, curses.COLOR_YELLOW)):
+        curses.init_pair(pair, fg, -1)
+
+    offset = 0
+    last_poll = 0.0
+    cols, herdr_ok = [], None
+    while True:
+        now = time.time()
+        if now - last_poll >= poll_period:
+            agents = herdr_agents(herdr_bin)
+            herdr_ok = agents is not None
+            cards = load_cards()
+            sweep(cards, agents)
+            cols = build_columns(agents, cards, now, stale_after,
+                                 procs=scan_procs())
+            last_poll = now
+
+        h, w = stdscr.getmaxyx()
+        if compact:
+            total = (len(cols) + 1) // 2
+        else:
+            blocks = [column_lines(c, w) for c in cols]
+            total = sum(len(b) + 1 for b in blocks)
+        offset = max(0, min(offset, total - (h - 4)))
+        active = sum(1 for c in cols if c["chip"] in ("working", "blocked"))
+        head = f" agent-board · {len(cols)} agents · {active} active"
+        if herdr_ok is False:
+            head += " · herdr snapshot unreachable"
+        stdscr.erase()
+        stdscr.addnstr(0, 0, head, w - 1, curses.A_BOLD)
+        if compact:
+            half = max(24, (w - 3) // 2)
+            split = (len(cols) + 1) // 2
+            y = 2 - offset
+            for i in range(split):
+                if 1 <= y < h - 1:
+                    left = cols[i]
+                    stdscr.addnstr(y, 0, compact_line(left, half), w - 1,
+                                   curses.color_pair(CHIP_COLOR.get(left["chip"], 0)))
+                if split + i < len(cols) and 1 <= y < h - 1:
+                    right = cols[split + i]
+                    stdscr.addnstr(y, half + 1, "│", w - 1, curses.A_DIM)
+                    stdscr.addnstr(y, half + 2, compact_line(right, half),
+                                   w - half - 3,
+                                   curses.color_pair(CHIP_COLOR.get(right["chip"], 0)))
+                y += 1
+        else:
+            y = 2 - offset
+            for block in blocks:
+                for text, attr in block:
+                    if 1 <= y < h - 1:
+                        stdscr.addnstr(y, 0, text, w - 1, attr)
+                    y += 1
+                y += 1
+        stdscr.addnstr(h - 1, 0, " q quit · ↑/↓ or j/k scroll ",
+                       w - 1, curses.A_DIM)
+        stdscr.refresh()
+
+        stdscr.timeout(250)
+        key = stdscr.getch()
+        if key in (ord("q"), ord("Q")):
+            return
+        if key in (curses.KEY_DOWN, ord("j")):
+            offset += 3
+        elif key in (curses.KEY_UP, ord("k")):
+            offset -= 3
+        elif key == curses.KEY_NPAGE:
+            offset += h - 4
+        elif key == curses.KEY_PPAGE:
+            offset -= h - 4
+        elif key in (curses.KEY_HOME, ord("g")):
+            offset = 0
+
+
+def run_serve(herdr_bin, poll_period, stale_after, frame_path):
+    """Headless loop for the systemd service: keep the frame file fresh."""
+    while True:
+        agents = herdr_agents(herdr_bin)
+        cards = load_cards()
+        sweep(cards, agents)
+        cols = build_columns(agents, cards, time.time(), stale_after,
+                             procs=scan_procs())
+        frame = render_frame(cols, herdr_ok=agents is not None, color=False)
+        tmp = frame_path + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(frame + "\n")
+        os.replace(tmp, frame_path)
+        time.sleep(poll_period)
+
+
+# --------------------------------------------------------------------------
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(
+        prog="agent-board", description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--once", action="store_true",
+                    help="render one frame and exit (no curses)")
+    ap.add_argument("--herdr-bin", default="herdr")
+    ap.add_argument("--poll-period", "--autorefresh", dest="poll_period",
+                    type=float, default=2.0,
+                    help="snapshot poll / autorefresh period in the TUI (s)")
+    ap.add_argument("--stale-seconds", type=float, default=600,
+                    help="external card age before 'stale' (s)")
+    ap.add_argument("--compact", action="store_true",
+                    help="compact view: one line per agent, two columns")
+    sub = ap.add_subparsers(dest="cmd")
+    note = sub.add_parser("note", help="agent side: post status to the board")
+    note.add_argument("action",
+                      choices=["register", "update", "step", "done", "stop"])
+    note.add_argument("-m", "--msg", help="status text (required unless stop)")
+    note.add_argument("--pane", help="override pane id "
+                                     "(default $HERDR_PANE_ID / tty)")
+    note.add_argument("--tab", help="override tab id")
+    note.add_argument("--header", help="override column header")
+    note.add_argument("--agent", help="override agent kind label")
+    sub.add_parser("serve", help="headless: keep the board frame file fresh "
+                                 "(for the agent-board service)")
+    ns = ap.parse_args(argv)
+
+    if ns.cmd == "note":
+        return cmd_note(ns, ns.herdr_bin)
+
+    if ns.cmd == "serve":
+        return run_serve(shutil.which(ns.herdr_bin) or ns.herdr_bin,
+                         max(1.0, ns.poll_period), ns.stale_seconds, FRAME_PATH)
+    herdr_bin = shutil.which(ns.herdr_bin) or ns.herdr_bin
+    agents = herdr_agents(herdr_bin)
+    cards = load_cards()
+    sweep(cards, agents)
+    cols = build_columns(agents, cards, time.time(), ns.stale_seconds,
+                         procs=scan_procs())
+    if ns.once:
+        render_once(cols, herdr_ok=agents is not None, compact=ns.compact)
+        return 0
+    return curses.wrapper(run_tui, herdr_bin,
+                          max(1.0, ns.poll_period), ns.stale_seconds, ns.compact)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

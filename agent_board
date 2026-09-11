@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# agent_board — manage the agent-board service: start/stop/restart/status/view
+#
+#   agent_board start     # install + enable + start the systemd user service
+#   agent_board stop      # stop + disable the service
+#   agent_board status    # service state + the current board frame
+#   agent_board view      # foreground fullscreen TUI (exec agent-board)
+#   agent_board logs [n]  # last n journal lines of the service
+set -u
+
+UNIT="agent-board.service"
+UNIT_SRC="$HOME/projects/agent_board/systemd/agent-board.service"
+UNIT_DST="$HOME/.config/systemd/user/$UNIT"
+FRAME="$HOME/.local/state/agent-board/board.txt"
+
+install_unit() {
+    if [ ! -f "$UNIT_DST" ]; then
+        mkdir -p "$HOME/.config/systemd/user"
+        cp "$UNIT_SRC" "$UNIT_DST"
+        systemctl --user daemon-reload
+    fi
+}
+
+case "${1:-status}" in
+    start)
+        install_unit
+        systemctl --user enable --now "$UNIT"
+        echo "agent-board: service started (frame: $FRAME)"
+        ;;
+    stop)
+        systemctl --user disable --now "$UNIT" 2>/dev/null
+        echo "agent-board: service stopped"
+        ;;
+    restart)
+        install_unit
+        systemctl --user restart "$UNIT"
+        echo "agent-board: service restarted"
+        ;;
+    status)
+        state=$(systemctl --user is-active "$UNIT" 2>/dev/null) || state=inactive
+        enabled=$(systemctl --user is-enabled "$UNIT" 2>/dev/null) || enabled=disabled
+        echo "service: $state ($enabled)"
+        if [ -f "$FRAME" ]; then
+            echo "frame: $(date -r "$FRAME" '+%Y-%m-%d %H:%M:%S')"
+            cat "$FRAME"
+        else
+            echo "frame: not written yet (run: agent_board start, or agent-board --once)"
+        fi
+        ;;
+    view|view-compact)
+        compact=""
+        [ "$1" = "view-compact" ] && compact=1
+        shift
+        period=30
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --autorefresh=*) period="${1#--autorefresh=}" ;;
+                --autorefresh) shift; period="${1:-30}" ;;
+                *) echo "agent_board: view: unknown option: $1" >&2; exit 2 ;;
+            esac
+            shift
+        done
+        if [ -n "$compact" ]; then
+            exec "$HOME/sbin/agent-board" --compact --autorefresh "$period"
+        fi
+        exec "$HOME/sbin/agent-board" --autorefresh "$period"
+        ;;
+    logs)
+        journalctl --user -u "$UNIT" -n "${2:-50}" --no-pager
+        ;;
+    *)
+        echo "usage: agent_board {start|stop|restart|status|view|view-compact [--autorefresh s]|logs [n]}" >&2
+        exit 2
+        ;;
+esac

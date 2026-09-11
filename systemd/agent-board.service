@@ -1,11 +1,11 @@
 [Unit]
-Description=agent-watch: notify which agent tab needs input
+Description=agent-board: live agent status board (frame file writer)
 After=graphical-session.target
 
 [Service]
 Type=simple
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=%h/sbin/agent-watch
+ExecStart=%h/sbin/agent-board serve
 Restart=always
 RestartSec=5
 
