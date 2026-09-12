@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# agent_board — manage the agent-board service: start/stop/restart/status/view
+# agent_board — manage the agent_board service: start/stop/restart/status/view
 #
 #   agent_board start     # install + enable + start the systemd user service
 #   agent_board stop      # stop + disable the service
 #   agent_board status    # service state + the current board frame
-#   agent_board view      # foreground fullscreen TUI (exec agent-board)
+#   agent_board view      # foreground fullscreen TUI (exec agent_board.py)
 #   agent_board logs [n]  # last n journal lines of the service
 set -u
 
-UNIT="agent-board.service"
+UNIT="agent_board.service"
 UNIT_SRC="$HOME/projects/agent_board/systemd/agent-board.service"
 UNIT_DST="$HOME/.config/systemd/user/$UNIT"
-FRAME="$HOME/.local/state/agent-board/board.txt"
+FRAME="$HOME/.local/state/agent_board/board.txt"
 
 install_unit() {
     if [ ! -f "$UNIT_DST" ]; then
@@ -61,15 +61,30 @@ case "${1:-status}" in
             shift
         done
         if [ -n "$compact" ]; then
-            exec "$HOME/sbin/agent-board" --compact --autorefresh "$period"
+            exec "$HOME/sbin/agent_board.py" --compact --autorefresh "$period"
         fi
-        exec "$HOME/sbin/agent-board" --autorefresh "$period"
+        exec "$HOME/sbin/agent_board.py" --autorefresh "$period"
+        ;;
+    help|-h|--help)
+        echo "agent_board — manage the agent_board service"
+        echo ""
+        echo "  start         install (if needed) + enable + start the systemd user service"
+        echo "  stop          stop + disable the service"
+        echo "  restart       restart the service"
+        echo "  status        service state + the current board frame"
+        echo "  view          fullscreen TUI (exec agent_board.py) [--autorefresh s]"
+        echo "  view-compact  compact TUI, one line per agent [--autorefresh s]"
+        echo "  logs [n]      last n journal lines of the service (default 50)"
+        echo "  --version     print the agent_board version"
         ;;
     logs)
         journalctl --user -u "$UNIT" -n "${2:-50}" --no-pager
         ;;
+    version|-v|--version)
+        "$HOME/sbin/agent_board.py" --version
+        ;;
     *)
-        echo "usage: agent_board {start|stop|restart|status|view|view-compact [--autorefresh s]|logs [n]}" >&2
+        echo "usage: agent_board {start|stop|restart|status|view|view-compact [--autorefresh s]|logs [n]|help|--version}" >&2
         exit 2
         ;;
 esac

@@ -1,0 +1,99 @@
+.TH AGENT_BOARD 1 "2026-09-12" "agent_board" "User Commands"
+.SH NAME
+agent_board.py \- live status board for coding agents
+.SH SYNOPSIS
+.B agent_board.py
+[\fIOPTIONS\fR]
+.br
+.B agent_board.py
+\fBnote\fR \fIACTION\fR [\fB\-m\fR \fIMSG\fR] [\fB\-\-pane\fR \fIID\fR]
+.SH DESCRIPTION
+.B agent_board.py
+renders a live status board with one vertical column per coding agent.
+Agents register and post one-line statuses; herdr's api snapshot is the
+source of truth for liveness (a column disappears the moment the agent's
+pane closes). Columns are colored: green while working, yellow while
+waiting for input, red when stopped by a rate/quota limit, cyan when idle.
+.PP
+Run \fBagent_board\fR (the wrapper) for the fullscreen TUI and service
+management; \fBagent_board.py \-\-once\fR prints a single frame.
+.SH OPTIONS
+.TP
+.B \-\-once
+Render one frame and exit (no curses).
+.TP
+.B \-\-compact
+Compact layout: one line per agent, two columns.
+.TP
+.B \-\-poll\-period, \-\-autorefresh \fISECONDS\fR
+Snapshot poll / frame autorefresh period (default: 2.0).
+.TP
+.B \-\-stale\-seconds \fISECONDS\fR
+External card age before "stale" (default: 600).
+.TP
+.B \-\-herdr\-bin \fIBIN\fR
+herdr binary for the liveness snapshot (default: \fBherdr\fR).
+.TP
+.B \-\-version
+Print the version and exit.
+.TP
+.B \-h, \-\-help
+Detailed colored help.
+.SH NOTE ACTIONS
+.TP
+.B register
+First post: opens the column (header = herdr tab title).
+.TP
+.B update
+Replace the current status line only.
+.TP
+.B step
+Replace the status line and append to the visible trail.
+.TP
+.B done
+Mark the column done (✓ chip); line appended to the trail.
+.TP
+.B input
+Waiting on the user: yellow chip; question/options go in the status
+line and trail. Cleared automatically by the next step/update.
+.TP
+.B quota
+Stopped by a rate/quota limit: red "stopped" chip; the status text gets
+a live "Resets in d hh:mm:ss" countdown when \fB\-\-reset\fR is given
+(ISO time, duration like \fB2d 3h\fR, or seconds). Cleared by the next
+step/update.
+.TP
+.B stop
+Remove your column (only needed outside herdr).
+.SH EXAMPLES
+.TP
+Fullscreen board (q quits, j/k scrolls)
+.B agent_board.py
+.TP
+Print a single frame
+.B agent_board.py \-\-once
+.TP
+Open a column
+.B agent_board.py note register \-m "refactoring auth module"
+.TP
+Ask the user (yellow chip)
+.B agent_board.py note input \-m "A) keep B) revert?"
+.TP
+Report a quota stop with countdown
+.B agent_board.py note quota \-m "Individual quota reached." \-\-reset 2d 3h
+.SH FILES
+.TP
+.I ~/projects/agent_board/agent_board.py
+The board source.
+.TP
+.I ~/.local/state/agent_board/
+Cards (one JSON per agent) and the rendered frame \fBboard.txt\fR.
+.TP
+.I ~/.config/systemd/user/agent_board.service
+The systemd user unit.
+.SH SEE ALSO
+.BR agent_board (1),
+.BR agent_watch (1),
+.BR herdr (1)
+.SH AUTHOR
+Written for the Oh My Pi harness user.

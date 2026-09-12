@@ -8,7 +8,8 @@ one-line status of what they are doing, updating it until the task is closed:
   agent-board note step     -m "todo 2/5: rewrite token refresh"
   agent-board note update   -m "running pytest -k auth"
   agent-board note done     -m "PR #12 opened, tests green"
-  agent-board note stop                     # leave the board
+  agent-board note input    -m "A) keep B) revert?"  # waiting on user
+  agent-board note quota    -m "quota reached" --reset 2d 3h
 
 Each agent is one vertical column; the column header is the agent's herdr
 tab title ("project name"), captured at register time. herdr's api snapshot
@@ -22,6 +23,7 @@ single frame (useful for logging or `watch`).
 """
 import argparse
 import curses
+from datetime import datetime
 import glob
 import json
 import os
@@ -31,24 +33,25 @@ import socket
 import subprocess
 import sys
 import time
-
-__version__ = "1.3.202609111640Z"
+__version__ = "2.0.202609121108Z"
 
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
-    "agent-board",
+    "agent_board",
 )
 FRAME_PATH = os.path.join(STATE_DIR, "board.txt")
 
 CHIP_SYMBOL = {"working": "●", "blocked": "×", "idle": "○", "done": "✓",
-               "unknown": "?", "ext": "+", "stale": "!"}
+               "input": "❯", "stopped": "■", "unknown": "?", "ext": "+",
+               "stale": "!"}
 CHIP_LABEL = {"working": "working", "blocked": "blocked", "idle": "idle",
-              "done": "done", "unknown": "unknown", "ext": "external",
+              "done": "done", "input": "needs input",
+              "stopped": "stopped", "unknown": "unknown", "ext": "external",
               "stale": "stale"}
 CHIP_COLOR = {"working": 1, "blocked": 2, "idle": 3, "done": 1,
-              "unknown": 4, "ext": 4, "stale": 2}
-STATUS_ORDER = {"working": 0, "blocked": 1, "unknown": 2, "ext": 3,
-                "stale": 3, "idle": 4, "done": 5}
+              "input": 4, "stopped": 2, "unknown": 4, "ext": 4, "stale": 2}
+STATUS_ORDER = {"working": 0, "input": 1, "stopped": 2, "blocked": 3,
+                "unknown": 4, "ext": 5, "stale": 5, "idle": 6, "done": 7}
 MAX_LOG = 24
 MAX_HEADER = 80
 MAX_MSG = 200
@@ -114,17 +117,21 @@ def drop_card(pane_id):
 # --------------------------------------------------------------------------
 
 def herdr_agents(herdr_bin):
-    """Live agent list, or None when the snapshot is unavailable."""
+    """(live agents, snapshot tabs), or (None, []) when unreachable."""
     try:
         out = subprocess.run([herdr_bin, "api", "snapshot"],
                              capture_output=True, text=True, timeout=10)
         if out.returncode != 0:
-            return None
+            return None, []
         data = json.loads(out.stdout)
-        agents = data.get("result", {}).get("snapshot", {}).get("agents", [])
-        return agents if isinstance(agents, list) else None
+        snap = data.get("result", {}).get("snapshot", {})
+        agents = snap.get("agents", [])
+        if not isinstance(agents, list):
+            return None, []
+        tabs = [t for t in snap.get("tabs") or [] if t.get("tab_id")]
+        return agents, tabs
     except (OSError, ValueError, subprocess.SubprocessError):
-        return None
+        return None, []
 
 
 def herdr_match(agents, pane_id, tab_id):
@@ -154,6 +161,36 @@ def self_pane_id():
     return "ext-anon-%d" % os.getppid()
 
 
+def parse_reset(text, now):
+    """--reset value: ISO time, a duration (2d 4h 30m / 90m), or seconds."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    m = re.fullmatch(
+        r"(?:(\d+)\s*d(?:ay)?s?[\s,]+)?(\d{1,3}):(\d{2}):(\d{2})", t, re.I)
+    if m:
+        return (now + int(m.group(1) or 0) * 86400
+                + int(m.group(2)) * 3600 + int(m.group(3)) * 60
+                + int(m.group(4)))
+    m = re.fullmatch(
+        r"(?:(\d+)\s*d(?:ay)?s?)?\s*(?:(\d+)\s*h(?:our)?s?)?"
+        r"\s*(?:(\d+)\s*m(?:in)?s?)?\s*(?:(\d+)\s*s(?:ec)?s?)?", t, re.I)
+    if m and any(m.groups()):
+        days, hours, mins, secs = (int(g) if g else 0 for g in m.groups())
+        return now + days * 86400 + hours * 3600 + mins * 60 + secs
+    try:
+        return now + float(t)  # bare number = seconds from now
+    except ValueError:
+        pass
+    try:
+        dt = datetime.fromisoformat(t.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.astimezone()
+        return dt.timestamp()
+    except ValueError:
+        return None
+
+
 def cmd_note(ns, herdr_bin):
     pane = ns.pane or self_pane_id()
     tab = ns.tab if ns.tab is not None else (
@@ -164,17 +201,17 @@ def cmd_note(ns, herdr_bin):
     if ns.action == "stop":
         if os.path.exists(path):
             os.remove(path)
-            print(f"agent-board: removed column {pane}")
+            print(f"agent_board: removed column {pane}")
         else:
-            print(f"agent-board: no column for {pane}")
+            print(f"agent_board: no column for {pane}")
         return 0
 
     if not ns.msg:
-        print("agent-board: -m/--msg required for this action", file=sys.stderr)
+        print("agent_board: -m/--msg required for this action", file=sys.stderr)
         return 2
     msg = ns.msg.strip()[:MAX_MSG]
 
-    agents = herdr_agents(herdr_bin) or []
+    agents, _ = herdr_agents(herdr_bin)
     match = herdr_match(agents, pane, tab)
     card = read_card(path)
 
@@ -200,16 +237,24 @@ def cmd_note(ns, herdr_bin):
         card["agent"] = ns.agent
     if tab:
         card["tab_id"] = tab
-    if ns.action in ("step", "done"):
+    if ns.action in ("step", "done", "input", "quota"):
         card["log"] = (card.get("log") or []) + [{"t": now, "k": ns.action,
                                                   "m": msg}]
         card["log"] = card["log"][-MAX_LOG:]
     if ns.action == "done":
         card["done"] = True
+    if ns.action == "input":
+        card["input"] = True
+    elif ns.action in ("update", "step", "done"):
+        card["input"] = False
+    if ns.action == "quota":
+        card["stopped"] = {"reset": parse_reset(ns.reset, now)}
+    elif ns.action in ("update", "step", "done"):
+        card.pop("stopped", None)
     card["pane_id"] = pane
 
     save_card(card)
-    print(f"agent-board: [{pane}] {ns.action}: {msg}")
+    print(f"agent_board: [{pane}] {ns.action}: {msg}")
     return 0
 
 
@@ -298,12 +343,16 @@ def resolve_ext_proc(pane_id, procs):
 # viewer: merge snapshot + cards into columns
 # --------------------------------------------------------------------------
 
-def build_columns(agents, cards, now, stale_after, procs=None):
+def build_columns(agents, cards, now, stale_after, procs=None, tabs=None):
     """Merge herdr agents (liveness) with posted cards (free text).
 
     `agents` may be None = snapshot unavailable; herdr-owned cards are then
-    hidden (unknown liveness) but not deleted.
+    hidden (unknown liveness) but not deleted.  `tabs` is the snapshot's
+    tab list; every tab without a detected agent gets its own column
+    (agent kind unknown) so no herdr tab can go missing from the board.
     """
+    labels = {t["tab_id"]: t.get("label") or "" for t in tabs or []
+              if t.get("tab_id")}
     cols = []
     for a in agents or []:
         pane = str(a.get("pane_id") or "")
@@ -313,14 +362,19 @@ def build_columns(agents, cards, now, stale_after, procs=None):
                   or a.get("cwd") or pane)
         kind = a.get("agent") or card.get("agent") or "?"
         pid, rss = resolve_proc(kind, a.get("cwd") or card.get("cwd") or "", procs)
+        tab = str(a.get("tab_id") or card.get("tab_id") or "")
         cols.append({
             "pane": pane,
             "agent": kind,
-            "tab": str(a.get("tab_id") or card.get("tab_id") or ""),
+            "tab": tab,
+            "tab_name": labels.get(tab, ""),
             "header": header[:MAX_HEADER],
-            "chip": "done" if card.get("done") else (a.get("agent_status") or "unknown"),
+            "chip": ("done" if card.get("done")
+                     else "stopped" if card.get("stopped")
+                     else "input" if card.get("input")
+                     else (a.get("agent_status") or "unknown")),
             "focused": bool(a.get("focused")),
-            "text": card.get("status") or "",
+            "text": status_text(card, now),
             "log": card.get("log") or [],
             "age": (now - card["updated"]) if card.get("updated") else None,
             "pid": pid, "rss": rss,
@@ -335,20 +389,43 @@ def build_columns(agents, cards, now, stale_after, procs=None):
         age = now - (card.get("updated") or now)
         if card.get("done"):
             chip = "done"
+        elif card.get("stopped"):
+            chip = "stopped"
+        elif card.get("input"):
+            chip = "input"
         elif age > stale_after:
             chip = "stale"
         else:
             chip = "ext"
         pid, rss = resolve_ext_proc(pane, procs)
+        tab = str(card.get("tab_id") or "")
         cols.append({
             "pane": pane,
             "agent": card.get("agent") or "external",
-            "tab": str(card.get("tab_id") or ""),
+            "tab": tab,
+            "tab_name": labels.get(tab, ""),
             "header": (card.get("header") or pane)[:MAX_HEADER],
             "chip": chip, "focused": False,
-            "text": card.get("status") or "",
+            "text": status_text(card, now),
             "log": card.get("log") or [], "age": age,
             "pid": pid, "rss": rss,
+        })
+
+    seen_tabs = {c["tab"] for c in cols if c["tab"]}
+    for t in tabs or []:
+        tab = str(t.get("tab_id") or "")
+        if tab in seen_tabs:
+            continue
+        cols.append({
+            "pane": tab,
+            "agent": "",
+            "tab": tab,
+            "tab_name": "",
+            "header": ((t.get("label") or tab))[:MAX_HEADER],
+            "chip": t.get("agent_status") or "unknown",
+            "focused": bool(t.get("focused")),
+            "text": "", "log": [], "age": None,
+            "pid": None, "rss": None,
         })
 
     cols.sort(key=lambda c: (STATUS_ORDER.get(c["chip"], 9),
@@ -376,13 +453,64 @@ def age_str(seconds):
     return f"{int(seconds // 3600)}h{int(seconds % 3600 // 60):02d}m"
 
 
+def dur_str(seconds):
+    """Countdown as d hh:mm:ss; days shown only when nonzero."""
+    seconds = max(0, int(seconds))
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    mins, secs = divmod(rem, 60)
+    return (f"{days}d " if days else "") + f"{hours:02d}:{mins:02d}:{secs:02d}"
+
+
+def status_text(card, now):
+    """Card status with the live quota-reset countdown appended."""
+    text = card.get("status") or ""
+    reset = (card.get("stopped") or {}).get("reset")
+    if reset:
+        text = f"{text} · Resets in {dur_str(reset - now)}"
+    return text
+
+
 def chip_str(col):
     star = "*" if col["focused"] else ""
     return f"{star}{CHIP_SYMBOL.get(col['chip'], '?')} {CHIP_LABEL[col['chip']]}"
 
 
+ACCENT_ANSI = {"badge": "36", "grey": "37", "tab": "35", "desc": "97"}
+AGENT_BADGE = {
+    # kind -> (badge symbol, tab-title prefixes to color in place);
+    # agents whose titles carry no prefix get the symbol prepended
+    "omp": ("π", ("π",)),
+    "opencode": ("OC", ("OpenCode", "OC")),
+    "agy": ("AG", ()),
+}
+
+
+def head_parts(col):
+    """Rule segments: chip state, grey (), magenta tab, cyan badge, white desc."""
+    parts = [(f"({chip_str(col)})", None)]
+    if col.get("tab_name"):
+        parts.append((" (", "grey"))
+        parts.append((col["tab_name"], "tab"))
+        parts.append((")", "grey"))
+    header = col["header"]
+    symbol, prefixes = AGENT_BADGE.get(col["agent"], ("", ()))
+    prefix = next((p for p in prefixes if header.startswith(p)), "")
+    if prefix:
+        parts.append((f" {prefix}", "badge"))
+        rest = header[len(prefix):]
+        if rest:
+            parts.append((rest, "desc"))
+    elif symbol:
+        parts.append((f" {symbol}", "badge"))
+        parts.append((f" {header}", "desc"))
+    else:
+        parts.append((f" {header}", "desc"))
+    return parts
+
+
 def meta_str(col):
-    parts = [col["agent"]]
+    parts = [col["agent"]] if col["agent"] else []
     if col["tab"]:
         parts.append(col["tab"])
     if col.get("pid"):
@@ -398,22 +526,28 @@ def meta_str(col):
 # one-shot ANSI render
 # --------------------------------------------------------------------------
 
-def compact_line(col, width):
-    """One line per agent: chip, header, and its current ("now") status."""
-    s = f"[{chip_str(col)}] {col['header']}"
+def compact_parts(col):
+    """Compact-line segments: rule head plus the current status tail."""
+    parts = head_parts(col)
     if col["text"]:
-        s += " · " + col["text"]
-    return s[:width]
+        parts += [(" · ", "grey"), (col["text"], "desc")]
+    return parts
+
+
+def compact_line(col, width):
+    """Plain one-line summary for one-shot / service frames."""
+    return "".join(t for t, _ in compact_parts(col))[:width]
 
 
 def render_frame(cols, herdr_ok, color, compact=False, width=118):
     ansi = {1: "32", 2: "31", 3: "36", 4: "33"}
     on = (lambda code, s: f"\x1b[{code}m{s}\x1b[0m") if color else (lambda code, s: s)
-    active = sum(1 for c in cols if c["chip"] in ("working", "blocked"))
-    head = f"agent-board · {len(cols)} agents · {active} active · {time.strftime('%H:%M:%S')}"
+    active = sum(1 for c in cols
+                 if c["chip"] in ("working", "blocked", "input"))
+    head = f"agent_board · {len(cols)} agents · {active} active · {time.strftime('%H:%M:%S')}"
     if herdr_ok is False:
         head += " · herdr snapshot unreachable"
-    lines = [on("1", head)]
+    lines = [on("1", head) + on(ACCENT_ANSI["grey"], f"  ({__version__})")]
     if compact:
         half = max(24, (width - 3) // 2)
         split = (len(cols) + 1) // 2
@@ -427,7 +561,8 @@ def render_frame(cols, herdr_ok, color, compact=False, width=118):
         return "\n".join(lines)
     for i, c in enumerate(cols):
         code = ansi.get(CHIP_COLOR.get(c["chip"]), "0")
-        lines.append(on(code, f"┌─ [{chip_str(c)}] {c['header']}"))
+        lines.append(on(code, "┌─ ") + "".join(
+            on(ACCENT_ANSI.get(k, code), t) for t, k in head_parts(c)))
         lines.append("│ " + meta_str(c))
         if c["text"]:
             lines.append("│ " + on(code, "● ") + c["text"])
@@ -448,11 +583,40 @@ def render_once(cols, herdr_ok, compact=False):
 # fullscreen TUI
 # --------------------------------------------------------------------------
 
+def accent_attr(kind, chip):
+    """curses attr for a rule segment kind; chip attr for the state."""
+    if kind == "badge":
+        return curses.color_pair(3) | curses.A_BOLD
+    if kind == "tab":
+        return curses.color_pair(5) | curses.A_BOLD
+    if kind == "grey":
+        return curses.color_pair(6)
+    if kind == "desc":
+        return curses.color_pair(6) | curses.A_BOLD
+    return chip
+
+
+def draw_parts(stdscr, y, x, parts, chip, limit):
+    """Draw (text, kind) segments left to right within `limit` columns."""
+    for text, kind in parts:
+        if x >= limit:
+            break
+        n = min(len(text), limit - x)
+        stdscr.addnstr(y, x, text, n, accent_attr(kind, chip))
+        x += n
+    return x
+
+
 def column_lines(col, width):
-    color = CHIP_COLOR.get(col["chip"], 0)
-    attr = curses.color_pair(color) | curses.A_BOLD
-    rule = f"┌─ [{chip_str(col)}] {col['header']}"
-    lines = [(rule, attr)]
+    chip = curses.color_pair(CHIP_COLOR.get(col["chip"], 0)) | curses.A_BOLD
+    lines = []
+    x = 0
+    for text, kind in [("┌─ ", None)] + head_parts(col):
+        if x >= width:
+            break
+        n = min(len(text), width - x)
+        lines.append((text[:n], accent_attr(kind, chip)))
+        x += n
     lines.append(("│ " + meta_str(col), curses.A_DIM))
     if col["text"]:
         lines.append(("│ ● " + col["text"], curses.A_BOLD))
@@ -468,7 +632,8 @@ def run_tui(stdscr, herdr_bin, poll_period, stale_after, compact=False):
     curses.start_color()
     curses.use_default_colors()
     for pair, fg in ((1, curses.COLOR_GREEN), (2, curses.COLOR_RED),
-                     (3, curses.COLOR_CYAN), (4, curses.COLOR_YELLOW)):
+                     (3, curses.COLOR_CYAN), (4, curses.COLOR_YELLOW),
+                     (5, curses.COLOR_MAGENTA), (6, curses.COLOR_WHITE)):
         curses.init_pair(pair, fg, -1)
 
     offset = 0
@@ -477,12 +642,12 @@ def run_tui(stdscr, herdr_bin, poll_period, stale_after, compact=False):
     while True:
         now = time.time()
         if now - last_poll >= poll_period:
-            agents = herdr_agents(herdr_bin)
+            agents, tabs = herdr_agents(herdr_bin)
             herdr_ok = agents is not None
             cards = load_cards()
             sweep(cards, agents)
             cols = build_columns(agents, cards, now, stale_after,
-                                 procs=scan_procs())
+                                 procs=scan_procs(), tabs=tabs)
             last_poll = now
 
         h, w = stdscr.getmaxyx()
@@ -492,12 +657,16 @@ def run_tui(stdscr, herdr_bin, poll_period, stale_after, compact=False):
             blocks = [column_lines(c, w) for c in cols]
             total = sum(len(b) + 1 for b in blocks)
         offset = max(0, min(offset, total - (h - 4)))
-        active = sum(1 for c in cols if c["chip"] in ("working", "blocked"))
-        head = f" agent-board · {len(cols)} agents · {active} active"
+        active = sum(1 for c in cols
+                     if c["chip"] in ("working", "blocked", "input"))
+        head = f" agent_board · {len(cols)} agents · {active} active"
         if herdr_ok is False:
             head += " · herdr snapshot unreachable"
         stdscr.erase()
         stdscr.addnstr(0, 0, head, w - 1, curses.A_BOLD)
+        if len(head) + 2 < w - 1:
+            stdscr.addnstr(0, len(head), f"  ({__version__})",
+                           w - len(head) - 1, curses.color_pair(6))
         if compact:
             half = max(24, (w - 3) // 2)
             split = (len(cols) + 1) // 2
@@ -505,14 +674,17 @@ def run_tui(stdscr, herdr_bin, poll_period, stale_after, compact=False):
             for i in range(split):
                 if 1 <= y < h - 1:
                     left = cols[i]
-                    stdscr.addnstr(y, 0, compact_line(left, half), w - 1,
-                                   curses.color_pair(CHIP_COLOR.get(left["chip"], 0)))
+                    chip = curses.color_pair(
+                        CHIP_COLOR.get(left["chip"], 0)) | curses.A_BOLD
+                    draw_parts(stdscr, y, 0, compact_parts(left),
+                               chip, min(half, w - 1))
                 if split + i < len(cols) and 1 <= y < h - 1:
                     right = cols[split + i]
                     stdscr.addnstr(y, half + 1, "│", w - 1, curses.A_DIM)
-                    stdscr.addnstr(y, half + 2, compact_line(right, half),
-                                   w - half - 3,
-                                   curses.color_pair(CHIP_COLOR.get(right["chip"], 0)))
+                    chip = curses.color_pair(
+                        CHIP_COLOR.get(right["chip"], 0)) | curses.A_BOLD
+                    draw_parts(stdscr, y, half + 2, compact_parts(right),
+                               chip, half + 2 + min(half, w - half - 3))
                 y += 1
         else:
             y = 2 - offset
@@ -545,11 +717,11 @@ def run_tui(stdscr, herdr_bin, poll_period, stale_after, compact=False):
 def run_serve(herdr_bin, poll_period, stale_after, frame_path):
     """Headless loop for the systemd service: keep the frame file fresh."""
     while True:
-        agents = herdr_agents(herdr_bin)
+        agents, tabs = herdr_agents(herdr_bin)
         cards = load_cards()
         sweep(cards, agents)
         cols = build_columns(agents, cards, time.time(), stale_after,
-                             procs=scan_procs())
+                             procs=scan_procs(), tabs=tabs)
         frame = render_frame(cols, herdr_ok=agents is not None, color=False)
         tmp = frame_path + ".tmp"
         with open(tmp, "w") as f:
@@ -560,32 +732,122 @@ def run_serve(herdr_bin, poll_period, stale_after, frame_path):
 
 # --------------------------------------------------------------------------
 
+HELP_EPILOG = """examples:
+  agent-board                              fullscreen TUI (q quits, j/k scrolls)
+  agent-board --once                       print a single frame (for `watch`)
+  agent-board --compact --once             one line per agent, two columns
+  agent-board note register -m "goal"      open your column
+  agent-board note step -m "todo 2/5 ..."  status line + visible trail entry
+  agent-board note update -m "pytest -k"   replace the status line only
+  agent-board note done -m "PR #12 green"  mark done (✓), appended to trail
+  agent-board note input -m "A or B?"      ask the user (yellow chip)
+  agent-board note quota -m "limit" --reset 2d 3h   stopped + countdown
+  agent-board note stop                    remove your column
+"""
+
+NOTE_EPILOG = """actions:
+  register  first post: opens the column (header = herdr tab title)
+  update    replace the current status line only
+  step      replace the status line and append to the visible trail
+  input     waiting on the user: yellow chip + question in the trail;
+            your next step/update clears it automatically
+  quota     stopped by a rate/quota limit: red chip, status text plus a
+            live "Resets in" countdown when --reset is given; your next
+            step/update clears it automatically
+  stop      remove your column (only needed outside herdr)
+
+examples:
+  agent-board note register -m "refactoring auth module"
+  agent-board note step     -m "todo 2/5: rewrite token refresh"
+  agent-board note update   -m "running pytest -k auth"
+  agent-board note done     -m "PR #12 opened, tests green"
+  agent-board note input    -m "A) keep B) revert?"
+  agent-board note quota    -m "Individual quota reached." --reset 2d 3h
+"""
+
+
+def _use_color():
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    return sys.stdout.isatty()
+
+
+def colorize_help(text):
+    """ANSI coloring for argparse output: headings, flags, metavars."""
+    if not _use_color():
+        return text
+    flag = lambda m: f"\x1b[36m{m.group(1)}\x1b[0m"
+    meta = lambda m: f"\x1b[1;33m{m.group(1)}\x1b[0m"
+    head = lambda m: f"{m.group(1)}\x1b[1;33m{m.group(2)}\x1b[0m:"
+    text = re.sub(r"(?m)^(\s*)([a-z][a-z ]*[a-z]):[ \t]*$", head, text)
+    text = re.sub(r"(?m)^usage: ", "\x1b[1musage: \x1b[0m", text)
+    text = re.sub(r"(?<![\w-])([A-Z][A-Z0-9_]{3,})(?![\w])", meta, text)
+    text = re.sub(r"(?<![\w-])(-{1,2}[A-Za-z][\w-]*)", flag, text)
+    return text
+
+
+class _ColoredParser(argparse.ArgumentParser):
+    """argparse parser that colorizes its help/usage on a TTY."""
+
+    def format_help(self):
+        return colorize_help(super().format_help())
+
+    def format_usage(self):
+        return colorize_help(super().format_usage())
+
+
 def main(argv=None):
-    ap = argparse.ArgumentParser(
-        prog="agent-board", description=__doc__,
+    ap = _ColoredParser(
+        prog="agent_board", description=__doc__, epilog=HELP_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--version", action="version",
+                    version=f"%(prog)s {__version__}",
+                    help="print the version and exit")
     ap.add_argument("--once", action="store_true",
                     help="render one frame and exit (no curses)")
-    ap.add_argument("--herdr-bin", default="herdr")
-    ap.add_argument("--poll-period", "--autorefresh", dest="poll_period",
-                    type=float, default=2.0,
-                    help="snapshot poll / autorefresh period in the TUI (s)")
-    ap.add_argument("--stale-seconds", type=float, default=600,
-                    help="external card age before 'stale' (s)")
     ap.add_argument("--compact", action="store_true",
-                    help="compact view: one line per agent, two columns")
-    sub = ap.add_subparsers(dest="cmd")
-    note = sub.add_parser("note", help="agent side: post status to the board")
+                    help="compact layout: one line per agent, two columns")
+    ap.add_argument("--poll-period", "--autorefresh", dest="poll_period",
+                    type=float, default=2.0, metavar="SECONDS",
+                    help="snapshot poll / frame autorefresh period (s)")
+    ap.add_argument("--stale-seconds", type=float, default=600,
+                    metavar="SECONDS",
+                    help="external card age before 'stale' (s)")
+    ap.add_argument("--herdr-bin", default="herdr", metavar="BIN",
+                    help="herdr binary for the liveness snapshot")
+    sub = ap.add_subparsers(dest="cmd", parser_class=_ColoredParser)
+    note = sub.add_parser(
+        "note", formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="post a status to the board (agent side)",
+        description="Post one status line to the board from inside the "
+                    "agent; `step` and `done` also append to the column's "
+                    "visible trail.",
+        epilog=NOTE_EPILOG)
     note.add_argument("action",
-                      choices=["register", "update", "step", "done", "stop"])
-    note.add_argument("-m", "--msg", help="status text (required unless stop)")
-    note.add_argument("--pane", help="override pane id "
-                                     "(default $HERDR_PANE_ID / tty)")
-    note.add_argument("--tab", help="override tab id")
-    note.add_argument("--header", help="override column header")
-    note.add_argument("--agent", help="override agent kind label")
-    sub.add_parser("serve", help="headless: keep the board frame file fresh "
-                                 "(for the agent-board service)")
+                      choices=["register", "update", "step", "done", "input",
+                               "quota", "stop"],
+                      help="see the action table below")
+    note.add_argument("-m", "--msg", metavar="MSG",
+                      help="status line (required unless stop)")
+    note.add_argument("--pane", metavar="PANE",
+                      help="override pane id (default $HERDR_PANE_ID / tty)")
+    note.add_argument("--reset", metavar="WHEN",
+                      help="for 'quota': when the limit resets — ISO time, "
+                           "duration (2d 4h 30m / 90m), or seconds")
+    note.add_argument("--tab", metavar="TAB", help="override tab id")
+    note.add_argument("--header", metavar="HEADER",
+                      help="override column header "
+                           "(default: herdr tab title at register)")
+    note.add_argument("--agent", metavar="AGENT",
+                      help="override agent kind label")
+    sub.add_parser(
+        "serve", formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="headless loop: keep the board frame file fresh (service mode)",
+        description="Headless loop for the systemd service: re-renders the "
+                    "board to ~/.local/state/agent-board/board.txt every "
+                    "--poll-period seconds (minimum 1).")
     ns = ap.parse_args(argv)
 
     if ns.cmd == "note":
@@ -595,11 +857,11 @@ def main(argv=None):
         return run_serve(shutil.which(ns.herdr_bin) or ns.herdr_bin,
                          max(1.0, ns.poll_period), ns.stale_seconds, FRAME_PATH)
     herdr_bin = shutil.which(ns.herdr_bin) or ns.herdr_bin
-    agents = herdr_agents(herdr_bin)
+    agents, tabs = herdr_agents(herdr_bin)
     cards = load_cards()
     sweep(cards, agents)
     cols = build_columns(agents, cards, time.time(), ns.stale_seconds,
-                         procs=scan_procs())
+                         procs=scan_procs(), tabs=tabs)
     if ns.once:
         render_once(cols, herdr_ok=agents is not None, compact=ns.compact)
         return 0
