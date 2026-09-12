@@ -549,8 +549,11 @@ def test_tui_click_focuses_herdr_tab(tmp_path):
     fake = tmp_path / "fake-herdr"
     snap = json.dumps({"result": {"snapshot": {
         "agents": [{"pane_id": "p1", "tab_id": "w1:tX", "agent": "omp",
-                    "agent_status": "working", "cwd": "/x"}],
-        "tabs": [{"tab_id": "w1:tX", "label": "Test"}],
+                    "agent_status": "working", "cwd": "/x"},
+                   {"pane_id": "p2", "tab_id": "w1:tY", "agent": "claude",
+                    "agent_status": "idle", "cwd": "/y"}],
+        "tabs": [{"tab_id": "w1:tX", "label": "Test"},
+                 {"tab_id": "w1:tY", "label": "Second"}],
         "panes": []}}})
     fake.write_text(
         "#!/bin/bash\necho \"$@\" >> " + str(log) + "\n"
@@ -580,7 +583,7 @@ def test_tui_click_focuses_herdr_tab(tmp_path):
     clean = re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "",
                    screen.decode("utf-8", "replace"))
     clean = clean.replace("\x1b(B", "").replace("\x1b)B", "")
-    assert "1 (" in clean  # columns are numbered
+    assert "1 (" in clean and "2 (" in clean  # both columns numbered
 
     os.write(fd, b"\x1b[<0;11;3M\x1b[<0;11;3m")  # click row 3 (y=2), col 11
     time.sleep(1.5)

@@ -33,7 +33,7 @@ import socket
 import subprocess
 import sys
 import time
-__version__ = "2.1.202609121207Z"
+__version__ = "2.1.202609121215Z"
 
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
@@ -705,11 +705,13 @@ def run_tui(stdscr, herdr_bin, poll_period, stale_after, compact=False):
                                [(f"{i + 1} ", "grey")] + compact_parts(left),
                                chip, min(half, w - 1))
                 if right is not None and 1 <= y < h - 1:
-                    right = cols[right]
+                    right_col = cols[right]
                     stdscr.addnstr(y, half + 1, "│", w - 1, curses.A_DIM)
                     chip = curses.color_pair(
-                        CHIP_COLOR.get(right["chip"], 0)) | curses.A_BOLD
-                    draw_parts(stdscr, y, half + 3, compact_parts(right),
+                        CHIP_COLOR.get(right_col["chip"], 0)) | curses.A_BOLD
+                    draw_parts(stdscr, y, half + 3,
+                               [(f"{right + 1} ", "grey")]
+                               + compact_parts(right_col),
                                chip, half + 3 + min(half, w - half - 3))
                 y += 1
         else:
