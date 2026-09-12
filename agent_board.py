@@ -4,12 +4,12 @@
 Agents running under herdr (or in any shell) register themselves and post a
 one-line status of what they are doing, updating it until the task is closed:
 
-  agent-board note register -m "refactoring auth module"
-  agent-board note step     -m "todo 2/5: rewrite token refresh"
-  agent-board note update   -m "running pytest -k auth"
-  agent-board note done     -m "PR #12 opened, tests green"
-  agent-board note input    -m "A) keep B) revert?"  # waiting on user
-  agent-board note quota    -m "quota reached" --reset 2d 3h
+  agent_board.py note register -m "refactoring auth module"
+  agent_board.py note step     -m "todo 2/5: rewrite token refresh"
+  agent_board.py note update   -m "running pytest -k auth"
+  agent_board.py note done     -m "PR #12 opened, tests green"
+  agent_board.py note input    -m "A) keep B) revert?"  # waiting on user
+  agent_board.py note quota    -m "quota reached" --reset 2d 3h
 
 Each agent is one vertical column; the column header is the agent's herdr
 tab title ("project name"), captured at register time. herdr's api snapshot
@@ -18,7 +18,7 @@ agent's pane closes. Cards carry the free-text progress ("what is it doing",
 "what has it done"). Agents outside herdr get a column too; it disappears on
 `note stop` or after --stale-seconds without an update.
 
-Run `agent-board` for the fullscreen TUI; `agent-board --once` prints a
+Run `agent-board` for the fullscreen TUI; `agent_board.py --once` prints a
 single frame (useful for logging or `watch`).
 """
 import argparse
@@ -33,7 +33,7 @@ import socket
 import subprocess
 import sys
 import time
-__version__ = "2.0.202609121108Z"
+__version__ = "2.0.202609121157Z"
 
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
@@ -144,7 +144,7 @@ def herdr_match(agents, pane_id, tab_id):
 
 
 # --------------------------------------------------------------------------
-# agent side: `agent-board note ...`
+# agent side: `agent_board.py note ...`
 # --------------------------------------------------------------------------
 
 def self_pane_id():
@@ -683,8 +683,8 @@ def run_tui(stdscr, herdr_bin, poll_period, stale_after, compact=False):
                     stdscr.addnstr(y, half + 1, "│", w - 1, curses.A_DIM)
                     chip = curses.color_pair(
                         CHIP_COLOR.get(right["chip"], 0)) | curses.A_BOLD
-                    draw_parts(stdscr, y, half + 2, compact_parts(right),
-                               chip, half + 2 + min(half, w - half - 3))
+                    draw_parts(stdscr, y, half + 3, compact_parts(right),
+                               chip, half + 3 + min(half, w - half - 3))
                 y += 1
         else:
             y = 2 - offset
@@ -733,16 +733,16 @@ def run_serve(herdr_bin, poll_period, stale_after, frame_path):
 # --------------------------------------------------------------------------
 
 HELP_EPILOG = """examples:
-  agent-board                              fullscreen TUI (q quits, j/k scrolls)
-  agent-board --once                       print a single frame (for `watch`)
-  agent-board --compact --once             one line per agent, two columns
-  agent-board note register -m "goal"      open your column
-  agent-board note step -m "todo 2/5 ..."  status line + visible trail entry
-  agent-board note update -m "pytest -k"   replace the status line only
-  agent-board note done -m "PR #12 green"  mark done (✓), appended to trail
-  agent-board note input -m "A or B?"      ask the user (yellow chip)
-  agent-board note quota -m "limit" --reset 2d 3h   stopped + countdown
-  agent-board note stop                    remove your column
+  agent_board.py                             fullscreen TUI (q quits, j/k scrolls)
+  agent_board.py --once                       print a single frame (for `watch`)
+  agent_board.py --compact --once             one line per agent, two columns
+  agent_board.py note register -m "goal"      open your column
+  agent_board.py note step -m "todo 2/5 ..."  status line + visible trail entry
+  agent_board.py note update -m "pytest -k"   replace the status line only
+  agent_board.py note done -m "PR #12 green"  mark done (✓), appended to trail
+  agent_board.py note input -m "A or B?"      ask the user (yellow chip)
+  agent_board.py note quota -m "limit" --reset 2d 3h   stopped + countdown
+  agent_board.py note stop                    remove your column
 """
 
 NOTE_EPILOG = """actions:
@@ -757,12 +757,12 @@ NOTE_EPILOG = """actions:
   stop      remove your column (only needed outside herdr)
 
 examples:
-  agent-board note register -m "refactoring auth module"
-  agent-board note step     -m "todo 2/5: rewrite token refresh"
-  agent-board note update   -m "running pytest -k auth"
-  agent-board note done     -m "PR #12 opened, tests green"
-  agent-board note input    -m "A) keep B) revert?"
-  agent-board note quota    -m "Individual quota reached." --reset 2d 3h
+  agent_board.py note register -m "refactoring auth module"
+  agent_board.py note step     -m "todo 2/5: rewrite token refresh"
+  agent_board.py note update   -m "running pytest -k auth"
+  agent_board.py note done     -m "PR #12 opened, tests green"
+  agent_board.py note input    -m "A) keep B) revert?"
+  agent_board.py note quota    -m "Individual quota reached." --reset 2d 3h
 """
 
 
