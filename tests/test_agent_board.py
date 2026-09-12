@@ -9,8 +9,10 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
+import time
 import unittest.mock as mock
 from pathlib import Path
 
@@ -521,3 +523,73 @@ def test_wrapper_version():
                           capture_output=True, text=True, timeout=10)
     assert proc.returncode == 0
     assert mod.__version__ in proc.stdout and "agent_board" in proc.stdout
+
+
+# ---------------------------------------------------------------------------
+# click-to-focus
+# ---------------------------------------------------------------------------
+
+def test_column_at_click_compact_mapping():
+    row_map = {2: (0, 3), 3: (1, None)}
+    assert mod.column_at_click(row_map, 2, 10, True, 48) == 0     # left
+    assert mod.column_at_click(row_map, 2, 48, True, 48) == 0     # │ column
+    assert mod.column_at_click(row_map, 2, 50, True, 48) == 3     # right
+    assert mod.column_at_click(row_map, 2, 60, True, 48) == 3
+    assert mod.column_at_click(row_map, 3, 60, True, 48) == 1     # no right
+    assert mod.column_at_click(row_map, 9, 10, True, 48) is None  # off-board
+
+
+def test_column_at_click_fullscreen_mapping():
+    assert mod.column_at_click({4: 1, 5: 1, 6: 1}, 5, 0, False, 48) == 1
+    assert mod.column_at_click({}, 5, 0, False, 48) is None
+
+
+def test_tui_click_focuses_herdr_tab(tmp_path):
+    log = tmp_path / "herdr-log"
+    fake = tmp_path / "fake-herdr"
+    snap = json.dumps({"result": {"snapshot": {
+        "agents": [{"pane_id": "p1", "tab_id": "w1:tX", "agent": "omp",
+                    "agent_status": "working", "cwd": "/x"}],
+        "tabs": [{"tab_id": "w1:tX", "label": "Test"}],
+        "panes": []}}})
+    fake.write_text(
+        "#!/bin/bash\necho \"$@\" >> " + str(log) + "\n"
+        "if [ \"$1\" = api ] && [ \"$2\" = snapshot ]; then\n"
+        "    echo '" + snap.replace("'", "") + "'\nfi\n")
+    fake.chmod(0o755)
+
+    import pty, select as sel
+    pid, fd = pty.fork()
+    if pid == 0:
+        env = dict(os.environ, XDG_STATE_HOME=str(tmp_path / "xdgstate"),
+                   TERM="xterm-256color", LINES="30", COLUMNS="100")
+        env.pop("HERDR_PANE_ID", None)
+        os.execve(str(MODULE_PATH),
+                  ["agent_board.py", "--compact", "--poll-period", "1",
+                   "--herdr-bin", str(fake)], env)
+    time.sleep(2.5)
+    screen = b""
+    deadline = time.time() + 2
+    while time.time() < deadline:
+        r, _, _ = sel.select([fd], [], [], 0.3)
+        if r:
+            try:
+                screen += os.read(fd, 65536)
+            except OSError:
+                break
+    clean = re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "",
+                   screen.decode("utf-8", "replace"))
+    clean = clean.replace("\x1b(B", "").replace("\x1b)B", "")
+    assert "1 (" in clean  # columns are numbered
+
+    os.write(fd, b"\x1b[<0;11;3M\x1b[<0;11;3m")  # click row 3 (y=2), col 11
+    time.sleep(1.5)
+    os.write(fd, b"1")     # type number 1
+    time.sleep(0.4)
+    os.write(fd, b"\r")    # Enter jumps
+    time.sleep(1.5)
+    os.write(fd, b"q")
+    time.sleep(0.8)
+    os.waitpid(pid, 0)
+    content = log.read_text() if log.exists() else ""
+    assert content.count("tab focus w1:tX") >= 2  # mouse click + number jump

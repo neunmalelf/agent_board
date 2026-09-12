@@ -33,7 +33,7 @@ import socket
 import subprocess
 import sys
 import time
-__version__ = "2.0.202609121157Z"
+__version__ = "2.1.202609121207Z"
 
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
@@ -607,11 +607,12 @@ def draw_parts(stdscr, y, x, parts, chip, limit):
     return x
 
 
-def column_lines(col, width):
+def column_lines(col, width, num=0):
     chip = curses.color_pair(CHIP_COLOR.get(col["chip"], 0)) | curses.A_BOLD
     lines = []
     x = 0
-    for text, kind in [("┌─ ", None)] + head_parts(col):
+    segs = [(f"{num} ", "grey")] if num else []
+    for text, kind in segs + [("┌─ ", None)] + head_parts(col):
         if x >= width:
             break
         n = min(len(text), width - x)
@@ -627,6 +628,19 @@ def column_lines(col, width):
     return lines
 
 
+def column_at_click(row_map, my, mx, compact, half):
+    """Column index under a mouse click, or None when nothing was hit."""
+    hit = row_map.get(my)
+    if hit is None:
+        return None
+    if compact:
+        left, right = hit
+        if mx > half + 1 and right is not None:
+            return right
+        return left
+    return hit
+
+
 def run_tui(stdscr, herdr_bin, poll_period, stale_after, compact=False):
     curses.curs_set(0)
     curses.start_color()
@@ -635,9 +649,17 @@ def run_tui(stdscr, herdr_bin, poll_period, stale_after, compact=False):
                      (3, curses.COLOR_CYAN), (4, curses.COLOR_YELLOW),
                      (5, curses.COLOR_MAGENTA), (6, curses.COLOR_WHITE)):
         curses.init_pair(pair, fg, -1)
+    try:
+        curses.mousemask(curses.BUTTON1_CLICKED | curses.BUTTON1_RELEASED
+                         | curses.BUTTON1_DOUBLE_CLICKED)
+        curses.mouseinterval(150)
+    except curses.error:
+        pass  # terminal without mouse support: keyboard only
 
     offset = 0
     last_poll = 0.0
+    row_map, half = {}, 0
+    focus_buf = ""
     cols, herdr_ok = [], None
     while True:
         now = time.time()
@@ -654,7 +676,8 @@ def run_tui(stdscr, herdr_bin, poll_period, stale_after, compact=False):
         if compact:
             total = (len(cols) + 1) // 2
         else:
-            blocks = [column_lines(c, w) for c in cols]
+            blocks = [column_lines(c, w, num=i + 1)
+                      for i, c in enumerate(cols)]
             total = sum(len(b) + 1 for b in blocks)
         offset = max(0, min(offset, total - (h - 4)))
         active = sum(1 for c in cols
@@ -672,14 +695,17 @@ def run_tui(stdscr, herdr_bin, poll_period, stale_after, compact=False):
             split = (len(cols) + 1) // 2
             y = 2 - offset
             for i in range(split):
+                right = split + i if split + i < len(cols) else None
                 if 1 <= y < h - 1:
+                    row_map[y] = (i, right)
                     left = cols[i]
                     chip = curses.color_pair(
                         CHIP_COLOR.get(left["chip"], 0)) | curses.A_BOLD
-                    draw_parts(stdscr, y, 0, compact_parts(left),
+                    draw_parts(stdscr, y, 0,
+                               [(f"{i + 1} ", "grey")] + compact_parts(left),
                                chip, min(half, w - 1))
-                if split + i < len(cols) and 1 <= y < h - 1:
-                    right = cols[split + i]
+                if right is not None and 1 <= y < h - 1:
+                    right = cols[right]
                     stdscr.addnstr(y, half + 1, "│", w - 1, curses.A_DIM)
                     chip = curses.color_pair(
                         CHIP_COLOR.get(right["chip"], 0)) | curses.A_BOLD
@@ -688,18 +714,37 @@ def run_tui(stdscr, herdr_bin, poll_period, stale_after, compact=False):
                 y += 1
         else:
             y = 2 - offset
-            for block in blocks:
+            for bi, block in enumerate(blocks):
                 for text, attr in block:
                     if 1 <= y < h - 1:
                         stdscr.addnstr(y, 0, text, w - 1, attr)
+                        row_map[y] = bi
                     y += 1
                 y += 1
-        stdscr.addnstr(h - 1, 0, " q quit · ↑/↓ or j/k scroll ",
-                       w - 1, curses.A_DIM)
+        foot = " q quit · ↑/↓ or j/k scroll · click column = focus tab "
+        if focus_buf:
+            foot = f" focus #{focus_buf} — Enter jumps, Esc cancels ·"
+        stdscr.addnstr(h - 1, 0, foot, w - 1, curses.A_DIM)
         stdscr.refresh()
 
         stdscr.timeout(250)
         key = stdscr.getch()
+        if key == curses.KEY_MOUSE:
+            try:
+                _, mx, my, _, bstate = curses.getmouse()
+            except curses.error:
+                continue
+            if bstate & (curses.BUTTON1_CLICKED | curses.BUTTON1_RELEASED
+                         | curses.BUTTON1_DOUBLE_CLICKED):
+                ci = column_at_click(row_map, my, mx, compact, half)
+                if ci is not None and cols[ci].get("tab"):
+                    try:
+                        subprocess.run([herdr_bin, "tab", "focus",
+                                        cols[ci]["tab"]],
+                                       capture_output=True, timeout=5)
+                    except (OSError, subprocess.SubprocessError):
+                        pass
+                continue
         if key in (ord("q"), ord("Q")):
             return
         if key in (curses.KEY_DOWN, ord("j")):
@@ -712,6 +757,27 @@ def run_tui(stdscr, herdr_bin, poll_period, stale_after, compact=False):
             offset -= h - 4
         elif key in (curses.KEY_HOME, ord("g")):
             offset = 0
+        elif key in (10, 13, curses.KEY_ENTER):
+            if focus_buf:
+                num = int(focus_buf) if focus_buf.isdigit() else 0
+                if 1 <= num <= len(cols) and cols[num - 1].get("tab"):
+                    try:
+                        subprocess.run([herdr_bin, "tab", "focus",
+                                        cols[num - 1]["tab"]],
+                                       capture_output=True, timeout=5)
+                    except (OSError, subprocess.SubprocessError):
+                        pass
+                focus_buf = ""
+            continue
+        elif key in (curses.KEY_BACKSPACE, 127, 263):
+            focus_buf = focus_buf[:-1]
+            continue
+        elif key == 27:  # Esc cancels the number prompt
+            focus_buf = ""
+            continue
+        elif 48 <= key <= 57 and len(focus_buf) < 3:
+            focus_buf += chr(key)
+            continue
 
 
 def run_serve(herdr_bin, poll_period, stale_after, frame_path):

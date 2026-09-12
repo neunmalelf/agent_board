@@ -3,7 +3,8 @@
 > Live status board for coding agents: one column per agent, liveness
 > from herdr, statuses and trails posted by the agents themselves.
 
-- Launch the fullscreen board (q quits, j/k scrolls):
+- Launch the fullscreen board (q quits, j/k scrolls; click a column or
+  type its number + Enter to focus that herdr tab):
   `agent_board.py`
 - Print a single frame (pipe into `watch`):
   `agent_board.py --once`
