@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# _run - launch the agent_board TUI, one-shot frame, or note CLI without installing.
+#
+#   ./_run                  fullscreen TUI (autorefresh 30 s)
+#   ./_run --once           print one ANSI frame
+#   ./_run view-compact     compact TUI, one line per agent
+#   ./_run note register -m "..."   post an agent note
+#   ./_run [ARGS...]        pass args straight to agent_board.py
+
+__VERSION__="1.0.20260913092333Z"
+
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+exec python3 ./agent_board.py "$@"

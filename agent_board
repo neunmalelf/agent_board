@@ -9,7 +9,7 @@
 set -u
 
 UNIT="agent_board.service"
-UNIT_SRC="$HOME/projects/agent_board/systemd/agent-board.service"
+UNIT_SRC="$HOME/projects/agent_board/systemd/agent_board.service"
 UNIT_DST="$HOME/.config/systemd/user/$UNIT"
 FRAME="$HOME/.local/state/agent_board/board.txt"
 

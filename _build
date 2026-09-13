@@ -1,0 +1,70 @@
+#!/bin/bash
+# _build - agent_board metadata build check (no binary artifacts by design).
+#   The board is stdlib-only Python; there is nothing to compile. This script
+#   validates the packaging metadata and version stamps instead.
+#   usage: ./_build [OPTIONS]
+#   options:
+#     -h, --help show this help and exit
+#     --version  show the _build version and exit
+
+__VERSION__="1.0.20260913092333Z"
+
+set -u
+cd "$(dirname "$0")" || exit 1
+
+case "${1:-}" in
+    -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,3\}//'; exit 0 ;;
+    --version) echo "[_build] v${__VERSION__}"; exit 0 ;;
+esac
+
+fail=0
+
+echo "[1/3] ./_check_version"
+if [ -x "./_check_version" ]; then
+    if ! ./_check_version; then
+        echo "[_build] version check FAILED" >&2
+        fail=1
+    fi
+else
+    echo "[_build] _check_version not found - SKIPPED" >&2
+fi
+echo ""
+
+echo "[2/3] pyproject metadata sanity"
+python3 - <<'EOF' || fail=1
+import tomllib
+
+with open("pyproject.toml", "rb") as fh:
+    p = tomllib.load(fh)
+
+required = ["name", "version", "description", "readme", "requires-python",
+            "license", "authors", "dependencies", "classifiers"]
+missing = [k for k in required if k not in p["project"]]
+if missing:
+    raise SystemExit(f"pyproject [project] missing: {', '.join(missing)}")
+if p["build-system"]["build-backend"] != "setuptools.build_meta":
+    raise SystemExit("unexpected build backend")
+print("pyproject [project] complete; backend setuptools; deps:", p["project"]["dependencies"])
+EOF
+[ $? -eq 0 ] || fail=1
+echo ""
+
+echo "[3/3] import sanity (board + watch)"
+python3 - <<'EOF'
+import sys
+sys.path.insert(0, "src")
+import agent_board
+from agent_board import board, watch
+
+print("agent_board", board.__version__, "| agent_watch", watch.__version__,
+      "| main:", callable(agent_board.main), callable(watch.main))
+EOF
+[ $? -eq 0 ] || fail=1
+echo ""
+
+if [ "$fail" -eq 0 ]; then
+    echo "[_build] ALL CHECKS PASSED"
+else
+    echo "[_build] CHECKS FAILED (see above)" >&2
+fi
+exit $fail

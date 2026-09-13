@@ -1,12 +1,10 @@
-"""Tests for the agent-board CLI (single-module script).
+"""Tests for the agent-board CLI (src/agent_board package).
 
 Run with:  python3 -m pytest tests/ -q
 All filesystem state lives in temp dirs; herdr is never invoked (patched
 or pointed at a nonexistent binary), so the suite is fast and isolated.
 """
 import argparse
-import importlib.machinery
-import importlib.util
 import json
 import os
 import re
@@ -18,30 +16,10 @@ from pathlib import Path
 
 import pytest
 
+from agent_board import board as mod
+
 REPO = Path(__file__).resolve().parent.parent
-MODULE_PATH = REPO / "agent_board.py"
-
-
-def _load():
-    """Load the single-module agent_board.py script as an importable module.
-
-    usage: _load
-    returns: The freshly executed agent_board module object.
-
-    Example:
-        mod = _load()
-    """
-    loader = importlib.machinery.SourceFileLoader("agent_board_mod",
-                                                  str(MODULE_PATH))
-    spec = importlib.util.spec_from_file_location("agent_board_mod",
-                                                  MODULE_PATH,
-                                                  loader=loader)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-mod = _load()
+MODULE_PATH = REPO / "agent_board.py"  # launcher shim, exercised by subprocess tests
 HERDR_MISSING = "/nonexistent-herdr"
 
 
@@ -730,7 +708,7 @@ def test_render_frame_compact_rows():
     cols = [col(pane=f"p{i}", chip="idle") for i in range(7)]
     frame = mod.render_frame(cols, herdr_ok=True, color=False, compact=True,
                              width=118)
-    lines = [l for l in frame.splitlines() if l.strip()]
+    lines = [ln for ln in frame.splitlines() if ln.strip()]
     assert len(lines) == 5  # header + 4 rows for 7 agents (odd -> last single)
     assert lines[1].count("│") == 1 and lines[-1].count("│") == 0
 
@@ -1033,7 +1011,8 @@ def test_tui_click_focuses_herdr_tab(tmp_path: Path):
         "    echo '" + snap.replace("'", "") + "'\nfi\n")
     fake.chmod(0o755)
 
-    import pty, select as sel
+    import pty
+    import select as sel
     pid, fd = pty.fork()
     if pid == 0:
         env = dict(os.environ, XDG_STATE_HOME=str(tmp_path / "xdgstate"),

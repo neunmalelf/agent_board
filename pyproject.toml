@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-board"
+# PEP 440 forbids the trailing "Z" of the workspace stamp convention, so the
+# packaging version carries the bare timestamp; module __version__ keeps the Z.
+version = "2.3.20260913092333"
+description = "agent_board - live status board for coding agents, plus the agent-watch notification daemon"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "MIT" }
+authors = [
+    { name = "neunmalelf" },
+]
+keywords = ["agents", "status-board", "tui", "monitoring", "herdr", "notifications"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: System :: Monitoring",
+]
+# agent_board is stdlib-only by design (curses TUI, /proc scanning, JSON
+# card files); zero third-party runtime dependencies.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "ruff",
+    "mypy",
+    "pytest",
+    "pytest-cov",
+]
+
+[project.scripts]
+agent-board = "agent_board.board:main"
+agent-watch = "agent_board.watch:main"
+
+# src/ layout: the root-level `agent_board` file is the bash service
+# manager, so the package must live under src/.
+[tool.setuptools]
+package-dir = { "" = "src" }
+packages = ["agent_board"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.mypy]
+files = ["src/agent_board"]
+python_version = "3.13"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # isort
+    "UP",     # pyupgrade
+    "B",      # bugbear
+    "SIM",    # simplify
+]

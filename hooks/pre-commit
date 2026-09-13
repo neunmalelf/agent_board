@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Pre-commit hook: modular check suite for ddpico and ddtoolbox.
-# Validates versioning, whole-package linting (ruff), type checking (mypy),
-# the test suite, and optional build.
+# Pre-commit hook: modular check suite for agent_board.
+# Validates version stamps, whole-package linting (ruff), type checking (mypy),
+# the test suite, and optional metadata build.
 #
 # Usage:
 #   Direct execution: hooks/pre-commit [OPTIONS]
@@ -17,11 +17,11 @@
 #   SKIP_RUFF=1               Skip whole-package ruff linting
 #   SKIP_MYPY=1               Skip mypy type checking
 #   SKIP_TESTS=1              Skip test suite execution
-#   SKIP_BUILD=1              Skip build validation
+#   SKIP_BUILD=1              Skip metadata build validation
 #   PRE_COMMIT_FULL_TESTS=1   Run full tests including ruff + mypy (default is --quick)
-#   PRE_COMMIT_BUILD=1        Enable standalone build verification (_build)
+#   PRE_COMMIT_BUILD=1        Enable metadata build verification (_build)
 
-__VERSION__="2.2.20260911224002Z"
+__VERSION__="1.0.20260913092333Z"
 
 set -euo pipefail
 
@@ -59,23 +59,6 @@ module_version() {
     return 0
 }
 
-# Module: Lazy export catalog sync check (_export_sync)
-module_export_sync() {
-    local sync_script="$ROOT/_export_sync"
-    if [[ ! -f "$sync_script" ]]; then
-        return 0
-    fi
-
-    echo "==> pre-commit [export_sync]: running '$sync_script --check'..." >&2
-    if ! "$sync_script" --check; then
-        echo "" >&2
-        echo "ERROR: Export catalog drift detected. Commit aborted." >&2
-        echo "Run ./_export_sync to synchronize ddpico/__init__.py." >&2
-        return 1
-    fi
-    return 0
-}
-
 # Module 2: Lint the whole package with ruff
 module_ruff() {
     if ! command -v ruff >/dev/null 2>&1; then
@@ -83,8 +66,8 @@ module_ruff() {
         return 0
     fi
 
-    echo "==> pre-commit [ruff]: running 'ruff check ddpico tests'..." >&2
-    if ! ruff check ddpico tests; then
+    echo "==> pre-commit [ruff]: running 'ruff check src tests'..." >&2
+    if ! ruff check src tests; then
         echo "" >&2
         echo "ERROR: 'ruff check' failed." >&2
         echo "Fix issues or bypass with 'git commit --no-verify' or 'SKIP_RUFF=1'." >&2
@@ -100,17 +83,17 @@ module_mypy() {
         return 0
     fi
 
-    echo "==> pre-commit [mypy]: running 'mypy ddpico'..." >&2
-    if ! mypy ddpico; then
+    echo "==> pre-commit [mypy]: running 'mypy src/agent_board'..." >&2
+    if ! mypy src/agent_board; then
         echo "" >&2
-        echo "ERROR: 'mypy ddpico' failed." >&2
+        echo "ERROR: 'mypy' failed." >&2
         echo "Fix type errors or bypass with 'git commit --no-verify' or 'SKIP_MYPY=1'." >&2
         return 1
     fi
     return 0
 }
 
-# Module 4: Test suite (uses _tests --quick when present, falls back to unittest)
+# Module 4: Test suite (uses _tests --quick when present, falls back to pytest)
 module_tests() {
     local test_script="$ROOT/_tests"
     if [[ -x "$test_script" ]]; then
@@ -126,26 +109,26 @@ module_tests() {
             return 1
         fi
     else
-        echo "==> pre-commit [tests]: running python3 unittest discovery..." >&2
-        if ! python3 -m unittest discover -s tests < /dev/null >/dev/null 2>&1; then
+        echo "==> pre-commit [tests]: running python3 -m pytest tests/ -q..." >&2
+        if ! python3 -m pytest tests/ -q < /dev/null >/dev/null 2>&1; then
             echo "" >&2
-            echo "ERROR: Unit test suite failed. Commit aborted." >&2
-            echo "Run 'python3 -m unittest discover -s tests' for details." >&2
+            echo "ERROR: Test suite failed. Commit aborted." >&2
+            echo "Run 'python3 -m pytest tests/ -q' for details." >&2
             return 1
         fi
     fi
     return 0
 }
 
-# Module 5: Build / Compilation validation (_build script)
+# Module 5: Metadata build validation (_build script; no artifacts by design)
 module_build() {
     local build_script="$ROOT/_build"
     if [[ ! -f "$build_script" ]]; then
         return 0
     fi
 
-    # In 1_ddpico, _build compiles standalone Nuitka binaries (multi-minute task).
-    # It runs when PRE_COMMIT_BUILD=1 is set, RUN_BUILD=1 is set, or when explicitly targeted.
+    # Runs only when explicitly requested: PRE_COMMIT_BUILD=1, RUN_BUILD=1,
+    # or --run=build.
     if [[ "${TARGET_MODULE:-}" != "build" ]] && [[ "${PRE_COMMIT_BUILD:-0}" != "1" ]] && [[ "${RUN_BUILD:-0}" != "1" ]]; then
         return 0
     fi
@@ -184,7 +167,7 @@ module_directory_hooks() {
 
 # --- 3. Module Runner & Dispatcher -------------------------------------------
 
-MODULES=("version" "export_sync" "ruff" "mypy" "tests" "build" "directory_hooks")
+MODULES=("version" "ruff" "mypy" "tests" "build" "directory_hooks")
 
 is_module_skipped() {
     local mod="$1"
@@ -205,7 +188,6 @@ run_module() {
 
     case "$mod" in
         version)         module_version ;;
-        export_sync)     module_export_sync ;;
         ruff)            module_ruff ;;
         mypy)            module_mypy ;;
         tests)           module_tests ;;
@@ -239,18 +221,17 @@ Options:
 
 Modules:
   version              Validate version stamps via ./_check_version (if present)
-  export_sync          Validate lazy exports via ./_export_sync --check (if present)
-  ruff                 Run 'ruff check ddpico tests' on the whole package
-  mypy                 Run 'mypy ddpico' type checking
-  tests                Run test suite (./_tests --quick or python3 -m unittest)
-  build                Run ./_build (runs when PRE_COMMIT_BUILD=1 or --run=build)
+  ruff                 Run 'ruff check src tests' on the whole package
+  mypy                 Run 'mypy src/agent_board' type checking
+  tests                Run test suite (./_tests --quick or python3 -m pytest)
+  build                Run ./_build metadata checks (PRE_COMMIT_BUILD=1 or --run=build)
   directory_hooks      Run custom scripts in hooks/pre-commit.d/*.sh
 
 Environment Overrides:
   SKIP_HOOKS=1              Skip all pre-commit modules
   SKIP_<MODULE>=1           Skip specific module (e.g. SKIP_TESTS=1, SKIP_RUFF=1, SKIP_MYPY=1)
-  PRE_COMMIT_FULL_TESTS=1   Run full _tests (unittest + ruff + mypy)
-  PRE_COMMIT_BUILD=1        Enable the build verification module
+  PRE_COMMIT_FULL_TESTS=1   Run full _tests (pytest + ruff + mypy)
+  PRE_COMMIT_BUILD=1        Enable the metadata build module
 EOF
             exit 0
             ;;

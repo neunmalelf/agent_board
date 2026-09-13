@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# _check_version - verify the agent_board version stamps are in sync.
+#   usage: ./_check_version [-h|--help] [--version]
+#   checks:
+#     1. pyproject.toml [project] version is Major.Minor.<14-digit UTC> (PEP 440
+#        forbids the trailing "Z" there)
+#     2. src/agent_board/board.py __version__ is Major.Minor.<14-digit UTC>Z and
+#        matches the pyproject version modulo the Z
+#     3. src/agent_board/watch.py __version__ carries the same timestamp stamp
+#   exit code: 0 when all stamps agree, 1 otherwise.
+
+__VERSION__="1.0.20260913092333Z"
+
+set -u
+cd "$(dirname "$0")" || exit 1
+
+case "${1:-}" in
+    -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,3\}//'; exit 0 ;;
+    --version) echo "[_check_version] v${__VERSION__}"; exit 0 ;;
+esac
+
+fail=0
+pyver=$(python3 - <<'EOF'
+import tomllib
+with open("pyproject.toml", "rb") as fh:
+    print(tomllib.load(fh)["project"]["version"])
+EOF
+) || fail=1
+boardver=$(python3 -c "import sys; sys.path.insert(0, 'src'); import agent_board; print(agent_board.__version__)")
+watchver=$(python3 -c "import sys; sys.path.insert(0, 'src'); from agent_board import watch; print(watch.__version__)")
+
+if ! printf '%s' "$pyver" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]{14}$'; then
+    echo "_check_version: pyproject '$pyver' is not Major.Minor.YYYYMMDDhhmmss (PEP 440, no Z)" >&2
+    fail=1
+fi
+for v in "$boardver" "$watchver"; do
+    if ! printf '%s' "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]{14}Z$'; then
+        echo "_check_version: '$v' is not Major.Minor.YYYYMMDDhhmmssZ" >&2
+        fail=1
+    fi
+done
+
+if [ "$pyver" != "${boardver%Z}" ]; then
+    echo "_check_version: pyproject.toml ($pyver) != src/agent_board/board.py ($boardver)" >&2
+    echo "  -> bump both stamps (same 14-digit UTC timestamp; pyproject without Z)" >&2
+    fail=1
+fi
+pysts=${pyver#*.*.}
+watchsts=${watchver#*.*.}
+watchsts=${watchsts%Z}
+if [ "$pysts" != "$watchsts" ]; then
+    echo "_check_version: timestamp drift: board $pysts vs watch $watchsts" >&2
+    fail=1
+fi
+
+if [ "$fail" -eq 0 ]; then
+    echo "_check_version: OK (pyproject $pyver = board $boardver, watch $watchver)"
+fi
+exit $fail

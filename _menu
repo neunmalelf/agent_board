@@ -1,0 +1,83 @@
+#!/bin/bash
+# _menu - agent_board helper menu (install / test / run / build / git).
+#   usage: ./_menu [OPTIONS]
+#   options:
+#     -h, --help    show this help and exit
+#     --version     show the _menu version and exit
+
+__VERSION__="1.0.20260913092333Z"
+_jobname="[_menu]"
+
+# --- colors (defined before usage so the help text can use them) ------------
+_COLOR_FG_CYAN=$'\033[36m'
+_COLOR_FG_YELLOW=$'\033[33m'
+_COLOR_FG_GREEN=$'\033[32m'
+_COLOR_RESET=$'\033[0m'
+
+# --- usage -------------------------------------------------------------------
+usage() {
+    cat <<EOF
+helper menu (${__VERSION__})
+
+usage: ./_menu [OPTIONS]
+
+options:
+  -h, --help       show this help and exit
+  --version        show the _menu version and exit
+
+menu:
+  1  install       ./_install
+  2  test          ./_tests
+  3  build         ./_build (metadata checks; no artifacts by design)
+  4  git           ./_git          (shown only when the script exists)
+  5  git push      git push
+  ${_COLOR_FG_CYAN}r  run board     ./_run (fullscreen TUI)${_COLOR_RESET}
+  ${_COLOR_FG_GREEN}o  one frame     ./_run --once${_COLOR_RESET}
+  ${_COLOR_FG_YELLOW}q  quit          quit the menu
+EOF
+}
+
+# --- argument parsing --------------------------------------------------------
+case "${1:-}" in
+    -h|--help)      usage; exit 0 ;;
+    --version)      echo "${_jobname} v${__VERSION__}"; exit 0 ;;
+    "")             : ;;
+    *)              echo "${_jobname} unknown option: ${1}" >&2; usage >&2; exit 1 ;;
+esac
+
+# --- work relative to this script's directory --------------------------------
+cd "$(dirname "$0")" || exit 1
+
+# --- menu loop ----------------------------------------------------------------
+while true; do
+    echo ""
+    echo "agent_board helper menu (${__VERSION__})"
+    echo ""
+    echo "        1) install"
+    echo "        ${_COLOR_FG_CYAN}2) test${_COLOR_RESET}"
+    echo "        3) build (metadata checks)"
+    [ -f "_git" ] && echo "        4) git"
+    echo "        ${_COLOR_FG_CYAN}5) git push${_COLOR_RESET}"
+    echo "        ${_COLOR_FG_CYAN}r) run board (fullscreen TUI)${_COLOR_RESET}"
+    echo "        ${_COLOR_FG_GREEN}o) one frame (--once)${_COLOR_RESET}"
+    echo "        ${_COLOR_FG_YELLOW}q) quit_menu${_COLOR_RESET}"
+    echo ""
+    printf "choose: "
+    read -r choice || { echo "${_jobname} bye"; break; }
+    case "$choice" in
+        1)      ./_install ;;
+        2)      ./_tests ;;
+        3)      ./_build ;;
+        4)      if [ -f "_git" ]; then ./_git; else echo "${_jobname} no _git script found"; fi ;;
+        5)      git push ;;
+        r|R)    ./_run ;;
+        o|O)    ./_run --once ;;
+        99|q|Q|end|quit|exit) echo "${_jobname} bye"; break ;;
+        *)      echo "${_jobname} unknown choice: ${choice}" ;;
+    esac
+done
+
+if [ -n "${BASH_SOURCE:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then
+    return 0
+fi
+exit 0

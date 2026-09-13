@@ -1,0 +1,57 @@
+#!/bin/bash
+# _docs - build the agent_board MkDocs documentation into site/.
+#   usage: ./_docs [OPTIONS]
+#   options:
+#     --open     build and open site/index.html in the browser
+#     --serve    serve the docs locally with live reload (mkdocs serve)
+#     -h, --help show this help and exit
+#     --version  show the _docs version and exit
+#   produces: site/index.html
+
+__VERSION__="1.0.20260913092333Z"
+
+set -u
+
+cd "$(dirname "$0")" || exit 1
+
+DO_OPEN=0
+DO_SERVE=0
+
+usage() {
+    cat <<EOF
+_docs - build the agent_board MkDocs documentation.
+  usage: ./_docs [OPTIONS]
+  options:
+    --open     build and open site/index.html in the browser
+    --serve    serve the docs locally with live reload (mkdocs serve)
+    -h, --help show this help and exit
+    --version  show the _docs version and exit
+  produces: site/index.html
+EOF
+}
+
+for arg in "$@"; do
+    case "$arg" in
+        --open) DO_OPEN=1 ;;
+        --serve) DO_SERVE=1 ;;
+        -h|--help) usage; exit 0 ;;
+        --version) echo "_docs $__VERSION__"; exit 0 ;;
+        *) echo "_docs: unknown option: $arg" >&2; usage >&2; exit 1 ;;
+    esac
+done
+
+if [ "$DO_SERVE" = "1" ]; then
+    exec uv run --group docs mkdocs serve
+fi
+
+uv run --group docs mkdocs build || exit 1
+
+if [ "$DO_OPEN" = "1" ]; then
+    if command -v xdg-open >/dev/null 2>&1; then
+        xdg-open site/index.html
+    elif command -v open >/dev/null 2>&1; then
+        open site/index.html
+    else
+        echo "_docs: docs built at site/index.html (no browser opener found)"
+    fi
+fi

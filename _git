@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# _git - interactive commit helper: timestamp prefix + confirm/edit, optional push.
+#   usage: ./_git [push|--push] [message words...]
+
+__VERSION__="1.0.20260913092333Z"
+
+set -u
+
+main() {
+    # Ensure git repository
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "Error: Not inside a Git repository." >&2
+        return 1
+    fi
+
+    # Parse a leading push/--push flag: commit normally, then push.
+    local push=0
+    local message_args=()
+    for arg in "$@"; do
+        if [[ "$arg" == "push" || "$arg" == "--push" ]]; then
+            push=1
+        else
+            message_args+=("$arg")
+        fi
+    done
+
+    local user_message="${message_args[*]:-}"
+    local timestamp
+    local commit_message_final
+
+    timestamp_get() {
+        date +%Y%m%d%H%M%S
+    }
+
+    commit_message_build() {
+        timestamp="$(timestamp_get)"
+        if [[ -n "$user_message" ]]; then
+            commit_message_final="${timestamp} -- ${user_message}"
+        else
+            commit_message_final="${timestamp}"
+        fi
+    }
+
+    commit_message_show() {
+        echo "----------------------------------------"
+        echo "Commit message: $commit_message_final"
+        if [ "$push" -eq 1 ]; then
+            echo "Push:        yes (after commit)"
+        fi
+        echo "----------------------------------------"
+    }
+
+    commit_message_edit() {
+        echo
+        # -e enables Readline (arrow keys, backspace, history)
+        # -i sets pre-filled editable text
+        read -e -r -p "Enter custom commit message: " -i "$user_message" user_message
+        commit_message_build
+    }
+
+    # Automatically stage changes if working tree is dirty
+    if [[ -n "$(git status --porcelain)" ]]; then
+        git add .
+    fi
+
+    # Check if anything is staged to commit
+    if git diff --cached --quiet; then
+        echo "Nothing staged to commit (working directory clean)."
+        return 0
+    fi
+
+    commit_message_build
+
+    while true; do
+        commit_message_show
+        read -r -p "Proceed? [Y]es / [e]dit / [n]o: " response
+
+        case "$response" in
+            ""|[yY]|[yY][eE][sS])
+                if ! git commit -m "$commit_message_final"; then
+                    echo "Commit failed." >&2
+                    return 1
+                fi
+                if [ "$push" -eq 1 ]; then
+                    branch="$(git rev-parse --abbrev-ref HEAD)"
+                    echo "[push] pushing $branch to origin..."
+                    if ! git push -u origin "$branch"; then
+                        echo "[push] push FAILED (see git output above)." >&2
+                        return 1
+                    fi
+                    echo "[push] pushed $branch to origin."
+                fi
+                return 0
+                ;;
+            [eE]|[eE][dD][iI][tT])
+                commit_message_edit
+                ;;
+            [nN]|[nN][oO]|[sS]|[sS][tT][oO][pP]|[qQ]|[qQ][uU][iI][tT])
+                echo "Commit aborted."
+                return 1
+                ;;
+            *)
+                echo "Invalid choice. Please choose Y (commit), e (edit), or n (abort)."
+                ;;
+        esac
+    done
+}
+
+main "$@"

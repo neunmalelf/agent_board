@@ -9,6 +9,10 @@ Two small tools live in this project (both Python 3, stdlib only):
 | `agent_board.py` | live status board: one vertical column per agent; agents register and post what they are doing until the task is closed |
 | `agent-watch` | daemon that pops a desktop notification naming the exact tab that needs input |
 
+The implementation lives in the `src/agent_board/` package (`board.py`,
+`watch.py`); the root-level `agent_board.py` / `agent_watch.py` files are
+thin launcher shims kept for the `~/sbin` symlinks and the systemd units.
+
 ## agent_board.py
 
 ### Service
@@ -93,12 +97,19 @@ q quits, j/k scroll.
 
 ### Tests
 
-`python3 -m pytest tests/ -q` — 46 tests covering text helpers, reset
-parsing, card storage, every `note` action (incl. `input`/`quota` flag
-lifecycles), column building (chip priority, sorting, tab fallback,
-sweep), rendering (plain/ANSI/compact, badges, countdowns), help
-coloring, process resolution, and the CLI + wrapper end-to-end in an
-isolated state dir. Run it after every change to `agent_board.py`.
+```sh
+./_tests                        # pytest + ruff + mypy (the full gate)
+./_tests --quick                # pytest only
+python3 -m pytest tests/ -q     # raw pytest
+```
+
+49 tests cover text helpers, reset parsing, card storage, every `note`
+action (incl. `input`/`quota` flag lifecycles), column building (chip
+priority, sorting, tab fallback, sweep), rendering (plain/ANSI/compact,
+badges, countdowns), help coloring, process resolution, and the CLI +
+wrapper end-to-end in an isolated state dir. `./_tests` additionally runs
+`ruff check src tests` and `mypy src/agent_board`. Run it after every
+change to the package; the pre-commit hook enforces it.
 
 ### Global skill
 
@@ -148,17 +159,52 @@ agent-watch --help             # all options
 | `--once` | off | single pass, then exit |
 | `--dry-run` | off | print instead of notifying |
 
+## Development
+
+The project is packaged with a PEP 621 `pyproject.toml` (setuptools, src/
+layout, console scripts `agent-board` / `agent-watch`) and ships the same
+helper-script toolset as the other `neunmalelf` projects:
+
+| Script | Purpose |
+|--------|---------|
+| `./_tests` | check suite: pytest + ruff + mypy (`--quick` skips static checks) |
+| `./_run` | run the TUI / one-shot frame / note CLI from a bare checkout |
+| `./_menu` | interactive helper menu (install/test/build/git/run) |
+| `./_git` | interactive commit with UTC-timestamp prefix, optional push |
+| `./_install` | `pip install -e .` + pre-commit hook wiring |
+| `./_build` | metadata + version-stamp validation (no artifacts by design) |
+| `./_docs` | build the MkDocs docs into `site/` |
+| `./_check_version` | verify version stamps agree (pyproject vs package) |
+
+A modular pre-commit hook (`hooks/pre-commit`, install once via
+`bash hooks/install.sh` or `./_install`) gates every commit with version
+stamps, `ruff check src tests`, `mypy src/agent_board`, and the quick test
+suite; single modules can be skipped via `SKIP_<MODULE>=1`.
+
+Versioning: `Major.Minor.YYYYMMDDhhmmssZ` (UTC timestamp stamp). The stamp
+lives in `src/agent_board/board.py __version__`; `pyproject.toml [project]
+version` carries the same stamp without the trailing `Z` (PEP 440 does not
+allow the Z) — kept in sync by `./_check_version`. Every helper script
+carries its own stamp. Project
+history is kept in `history.md` (newest entry on top, doubles as release
+notes) with working archives under `history/`; the rules are documented in
+`.agentrules` and `docs/development.md`. `AGENTS.md` is the entry file for
+coding agents.
 ## Layout
 
 ```
 ~/projects/agent_board/
-├── agent_board               # service manager (start/stop/status/view)
-├── agent_board.py             # status board: note CLI, TUI, serve mode
-├── agent-watch.py            # notification daemon
-├── agent_board_readme.md     # this file
-└── systemd/
-    ├── agent_board.service   # frame-writer service (agent_board start)
-    └── agent-watch.service   # watcher service
+├── src/agent_board/       # package: board.py (board) + watch.py (daemon)
+├── agent_board.py          # launcher shim (systemd + ~/sbin entry)
+├── agent_watch.py          # launcher shim (~/sbin/agent-watch entry)
+├── agent_board             # service manager (start/stop/status/view)
+├── _build _check_version _docs _git _install _menu _run _tests
+├── hooks/                  # modular pre-commit hook + installer
+├── history.md              # release log (newest entry on top)
+├── history/                # archives: prompts/ changes/ todo/ plans/ tests/ ideas/ goals/
+├── docs/  mkdocs.yml       # MkDocs sources + config (built into site/)
+├── man/  tldr/  systemd/  skills/  tests/
+└── AGENTS.md  .agentrules  LICENSE  pyproject.toml  requirements-dev.txt
 ```
 
 `~/sbin/agent_board.py`, `~/sbin/agent_watch` and `~/sbin/agent_board` are
@@ -170,21 +216,26 @@ symlinks into this directory.
 # 1. Put the project somewhere (here: ~/projects/agent_board)
 # 2. Symlink the binaries
 ln -s ~/projects/agent_board/agent_board.py ~/sbin/agent_board.py
-ln -s ~/projects/agent_board/agent-watch.py ~/sbin/agent-watch
+ln -s ~/projects/agent_board/agent_watch.py ~/sbin/agent_watch
 ln -s ~/projects/agent_board/agent_board ~/sbin/agent_board
 
-# 2. Install the services
+# 3. Install the services
 mkdir -p ~/.config/systemd/user
 cp ~/projects/agent_board/systemd/*.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now agent_board.service agent-watch.service
 
-# 3. Install the global posting skill
+# 4. Install the global posting skill
 mkdir -p ~/.agents/skills
 cp -r ~/projects/agent_board/skills/agent-board ~/.agents/skills/
+
+# (optional, devs) editable install with console scripts + git hook:
+~/projects/agent_board/_install
 ```
 
-Requirements: Python 3, `herdr` in PATH, `notify-send` (for agent-watch).
+Requirements: Python 3.13+, `herdr` in PATH, `notify-send` (for
+agent-watch). Dev checks additionally need `ruff`, `mypy`, `pytest`
+(`python3 -m pip install -r requirements-dev.txt`).
 
 ## Managing the services
 

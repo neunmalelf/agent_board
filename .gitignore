@@ -1,3 +1,19 @@
-agent_board/
+# python
 __pycache__/
+*.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.venv/
+
+# packaging
+build/
+dist/
+*.egg-info/
+
+# docs build output
+site/
+
+# local backups and scratch
+0_bak/

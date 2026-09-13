@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# _install - editable-install agent_board and wire up the git hook.
+#
+#   ./_install              pip install -e . + install the pre-commit hook
+#   ./_install --no-hooks   editable install only
+#   ./_install -h|--help    show this help and exit
+#   ./_install --version    show the _install version and exit
+
+__VERSION__="1.0.20260913092333Z"
+
+set -euo pipefail
+cd "$(dirname "$0")" || exit 1
+
+case "${1:-}" in
+    -h|--help)
+        sed -n '2,9p' "$0" | sed 's/^# \{0,3\}//'
+        exit 0
+        ;;
+    --version)
+        echo "[_install] v${__VERSION__}"
+        exit 0
+        ;;
+esac
+
+echo "[_install] python3 -m pip install -e ."
+python3 -m pip install -e .
+
+echo "[_install] console scripts: agent-board, agent-watch"
+command -v agent-board >/dev/null 2>&1 || echo "[_install] note: agent-board not on PATH yet (usually ~/.local/bin)" >&2
+
+if [ "${1:-}" != "--no-hooks" ] && [ -x "./hooks/install.sh" ]; then
+    bash ./hooks/install.sh
+fi
+
+echo "[_install] done"

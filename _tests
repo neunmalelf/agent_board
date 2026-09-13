@@ -1,0 +1,89 @@
+#!/bin/bash
+# _tests - run the full agent_board check suite: pytest, ruff, mypy.
+#   usage: ./_tests [OPTIONS]
+#   options:
+#     --quick    run only the pytest suite (skip ruff and mypy)
+#     -h, --help show this help and exit
+#     --version  show the _tests version and exit
+
+__VERSION__="1.0.20260913092333Z"
+
+set -u
+set -o pipefail
+cd "$(dirname "$0")" || exit 1
+
+fail=0
+QUICK=0
+
+usage() {
+    cat <<EOF
+_tests v${__VERSION__} - agent_board checks
+
+usage: ./_tests [OPTIONS]
+
+options:
+  --quick       run only the pytest suite (skip ruff and mypy)
+  -h, --help    show this help and exit
+  --version     show the _tests version and exit
+
+checks (default, in order):
+  [1/3] python3 -m pytest tests/ -q
+  [2/3] ruff check src tests
+  [3/3] mypy src/agent_board
+
+exit code: 0 when all checks pass, 1 otherwise
+EOF
+}
+
+case "${1:-}" in
+    --quick) QUICK=1 ;;
+    -h|--help) usage; exit 0 ;;
+    --version) echo "[_tests] v${__VERSION__}"; exit 0 ;;
+    "") ;;
+    *) echo "[_tests] unknown option: $1" >&2; usage >&2; exit 1 ;;
+esac
+
+echo ""
+echo "[_tests] v${__VERSION__} - agent_board checks"
+echo ""
+
+echo "[1/3] python3 -m pytest tests/ -q"
+if ! python3 -m pytest tests/ -q 2>&1 | tail -5; then
+    echo "[_tests] pytest FAILED" >&2
+    fail=1
+fi
+echo ""
+
+if [ "$QUICK" -eq 1 ]; then
+    echo "[_tests] --quick given: skipping ruff + mypy"
+    exit $fail
+fi
+
+echo "[2/3] ruff check src tests"
+if command -v ruff >/dev/null 2>&1; then
+    if ! ruff check src tests; then
+        echo "[_tests] ruff FAILED" >&2
+        fail=1
+    fi
+else
+    echo "[_tests] ruff not found - SKIPPED" >&2
+fi
+echo ""
+
+echo "[3/3] mypy src/agent_board"
+if command -v mypy >/dev/null 2>&1; then
+    if ! mypy src/agent_board; then
+        echo "[_tests] mypy FAILED" >&2
+        fail=1
+    fi
+else
+    echo "[_tests] mypy not found - SKIPPED" >&2
+fi
+echo ""
+
+if [ "$fail" -eq 0 ]; then
+    echo "[_tests] ALL CHECKS PASSED"
+else
+    echo "[_tests] CHECKS FAILED (see above)" >&2
+fi
+exit $fail

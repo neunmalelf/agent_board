@@ -1,0 +1,71 @@
+<!-- __version__: 1.0.20260913092333Z -->
+
+# Agent Rules for agent_board
+
+## Stdlib-Only Runtime Rule
+The runtime must stay zero-dependency: `pyproject.toml [project] dependencies = []`.
+Everything the board does (curses TUI, /proc scanning, JSON card files, ANSI
+frames) uses the standard library only. Third-party tools are allowed as
+*dev* dependencies (`[project.optional-dependencies].dev`,
+`requirements-dev.txt`) but must never be imported at runtime.
+
+## src/ Layout Rule
+All implementation lives in `src/agent_board/` (`board.py`, `watch.py`).
+The root-level `agent_board.py` and `agent_watch.py` are launcher shims
+only: sys.path bootstrap plus a `main()` call — never add features there.
+The root file `agent_board` (no extension) is the bash service manager;
+shell logic goes there, not into the Python package. (The wrapper file
+blocks a root-level package directory, which is why the package lives
+under `src/`.)
+
+## Proper and Complete pyproject.toml Rule
+`pyproject.toml` must stay PEP 517/518/621-compliant and complete:
+`[build-system]` (setuptools), full `[project]` metadata, `[project.scripts]`
+for every CLI entry, `[tool.ruff]`, `[tool.mypy]`, and
+`[tool.pytest.ini_options]`. `[project.urls]` is added when the repository
+gets a public remote — do not invent placeholder URLs. No legacy
+`setup.py`-only packaging.
+
+## Version Stamp Rule
+Versions are `Major.Minor.<14-digit UTC timestamp>Z` (trailing `Z`).
+Bump the stamp on every material change, before the commit:
+- `pyproject.toml [project] version` carries the same 14-digit timestamp
+  WITHOUT the Z (PEP 440 forbids the Z); `src/agent_board/board.py
+  __version__` keeps the Z; the two must match modulo the Z
+  (`./_check_version` enforces this).
+- `src/agent_board/watch.py __version__` carries its own Major.Minor with
+  the same timestamp.
+- Every helper script carries its own `__VERSION__` stamp, bumped when
+  that script changes.
+
+## Commit Before Changes
+Before implementing a new step or changing any module, commit the current
+state with the current version (`./_git` or
+`git commit -m "<stamp>: <summary>"`). Never mix unrelated changes into
+one commit.
+
+## Tests Before Commit
+`./_tests` must pass before every commit. The installed `hooks/pre-commit`
+enforces pytest (quick mode), `ruff check src tests`,
+`mypy src/agent_board`, and `./_check_version`; bypass single modules only
+deliberately (`SKIP_TESTS=1`) and never silently.
+
+## History Rule
+1. `history.md` (repo root) is the release log: newest entry on top, one
+   entry per version bump, written before the release commit; the latest
+   entry doubles as the release notes.
+2. `history/` is the working archive: `prompts/`, `changes/`, `todo/`,
+   `plans/`, `tests/`, `ideas/`, `goals/` — archive with a unified
+   `YYYYMMDDThhmmss` timestamp in the filename; never delete archived files.
+3. Decisions get their own dated entry in `history.md`, including reasoning
+   and rejected alternatives (see the 2026-09-13 textual decision).
+
+## Docstring Style
+`skills/python_comment_style` governs every Python function: typed
+signature, `usage:` line without types, `returns:`/`errors:` lines,
+Google-style `Args:`, executable `Example:`. Enforce it on new and changed
+functions.
+
+## Line Endings
+LF everywhere; `.gitattributes` enforces `* text=auto eol=lf`. Never write
+CRLF files into this repository.
