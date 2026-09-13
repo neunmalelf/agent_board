@@ -1,0 +1,293 @@
+#!/usr/bin/env bash
+# Pre-commit hook: modular check suite for ddpico and ddtoolbox.
+# Validates versioning, whole-package linting (ruff), type checking (mypy),
+# the test suite, and optional build.
+#
+# Usage:
+#   Direct execution: hooks/pre-commit [OPTIONS]
+#   Options:
+#     -h, --help           Show this help message and exit
+#     --list-modules       List all available check modules
+#     --run=<module>       Run only the specified module
+#     --version            Show hook version and exit
+#
+# Environment variables:
+#   SKIP_HOOKS=1              Bypass all pre-commit hook modules
+#   SKIP_VERSION=1            Skip version validation (_check_version)
+#   SKIP_RUFF=1               Skip whole-package ruff linting
+#   SKIP_MYPY=1               Skip mypy type checking
+#   SKIP_TESTS=1              Skip test suite execution
+#   SKIP_BUILD=1              Skip build validation
+#   PRE_COMMIT_FULL_TESTS=1   Run full tests including ruff + mypy (default is --quick)
+#   PRE_COMMIT_BUILD=1        Enable standalone build verification (_build)
+
+__VERSION__="2.2.20260911224002Z"
+
+set -euo pipefail
+
+# --- 1. Repository Root Resolution -------------------------------------------
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -z "$ROOT" ]]; then
+    exit 0
+fi
+
+# Ensure working directory is the repository root
+cd "$ROOT"
+
+# Bypass if requested
+if [[ "${SKIP_HOOKS:-0}" == "1" ]] || [[ "${PRE_COMMIT_SKIP:-0}" == "1" ]]; then
+    echo "pre-commit: all hooks skipped via environment variable."
+    exit 0
+fi
+
+# --- 2. Module Implementations -----------------------------------------------
+
+# Module 1: Version validation (project convention via _check_version)
+module_version() {
+    local check_script="$ROOT/_check_version"
+    if [[ ! -f "$check_script" ]]; then
+        return 0
+    fi
+
+    echo "==> pre-commit [version]: running $check_script" >&2
+    if ! "$check_script" < /dev/null >&2; then
+        echo "" >&2
+        echo "ERROR: Version validation failed. Commit aborted." >&2
+        echo "Run ./_check_version to see details." >&2
+        return 1
+    fi
+    return 0
+}
+
+# Module: Lazy export catalog sync check (_export_sync)
+module_export_sync() {
+    local sync_script="$ROOT/_export_sync"
+    if [[ ! -f "$sync_script" ]]; then
+        return 0
+    fi
+
+    echo "==> pre-commit [export_sync]: running '$sync_script --check'..." >&2
+    if ! "$sync_script" --check; then
+        echo "" >&2
+        echo "ERROR: Export catalog drift detected. Commit aborted." >&2
+        echo "Run ./_export_sync to synchronize ddpico/__init__.py." >&2
+        return 1
+    fi
+    return 0
+}
+
+# Module 2: Lint the whole package with ruff
+module_ruff() {
+    if ! command -v ruff >/dev/null 2>&1; then
+        echo "pre-commit [ruff]: ruff not found - SKIPPED" >&2
+        return 0
+    fi
+
+    echo "==> pre-commit [ruff]: running 'ruff check ddpico tests'..." >&2
+    if ! ruff check ddpico tests; then
+        echo "" >&2
+        echo "ERROR: 'ruff check' failed." >&2
+        echo "Fix issues or bypass with 'git commit --no-verify' or 'SKIP_RUFF=1'." >&2
+        return 1
+    fi
+    return 0
+}
+
+# Module 3: Type-check the package with mypy
+module_mypy() {
+    if ! command -v mypy >/dev/null 2>&1; then
+        echo "pre-commit [mypy]: mypy not found - SKIPPED" >&2
+        return 0
+    fi
+
+    echo "==> pre-commit [mypy]: running 'mypy ddpico'..." >&2
+    if ! mypy ddpico; then
+        echo "" >&2
+        echo "ERROR: 'mypy ddpico' failed." >&2
+        echo "Fix type errors or bypass with 'git commit --no-verify' or 'SKIP_MYPY=1'." >&2
+        return 1
+    fi
+    return 0
+}
+
+# Module 4: Test suite (uses _tests --quick when present, falls back to unittest)
+module_tests() {
+    local test_script="$ROOT/_tests"
+    if [[ -x "$test_script" ]]; then
+        local test_args=()
+        if [[ "${PRE_COMMIT_FULL_TESTS:-0}" != "1" ]]; then
+            test_args+=("--quick")
+        fi
+        echo "==> pre-commit [tests]: running test suite ($test_script ${test_args[*]:-})..." >&2
+        if ! "$test_script" "${test_args[@]}" < /dev/null; then
+            echo "" >&2
+            echo "ERROR: Test suite failed. Commit aborted." >&2
+            echo "Run ./_tests to see details." >&2
+            return 1
+        fi
+    else
+        echo "==> pre-commit [tests]: running python3 unittest discovery..." >&2
+        if ! python3 -m unittest discover -s tests < /dev/null >/dev/null 2>&1; then
+            echo "" >&2
+            echo "ERROR: Unit test suite failed. Commit aborted." >&2
+            echo "Run 'python3 -m unittest discover -s tests' for details." >&2
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# Module 5: Build / Compilation validation (_build script)
+module_build() {
+    local build_script="$ROOT/_build"
+    if [[ ! -f "$build_script" ]]; then
+        return 0
+    fi
+
+    # In 1_ddpico, _build compiles standalone Nuitka binaries (multi-minute task).
+    # It runs when PRE_COMMIT_BUILD=1 is set, RUN_BUILD=1 is set, or when explicitly targeted.
+    if [[ "${TARGET_MODULE:-}" != "build" ]] && [[ "${PRE_COMMIT_BUILD:-0}" != "1" ]] && [[ "${RUN_BUILD:-0}" != "1" ]]; then
+        return 0
+    fi
+
+    echo "==> pre-commit [build]: running $build_script" >&2
+    if ! "$build_script" < /dev/null >&2; then
+        echo "" >&2
+        echo "ERROR: _build failed. Commit aborted." >&2
+        echo "Run ./_build to see details." >&2
+        return 1
+    fi
+    return 0
+}
+
+# Module 6: Drop-in directory modules (hooks/pre-commit.d/*.sh)
+module_directory_hooks() {
+    local hooks_dir="$ROOT/hooks/pre-commit.d"
+    if [[ ! -d "$hooks_dir" ]]; then
+        return 0
+    fi
+
+    local status=0
+    for hook in "$hooks_dir"/*.sh; do
+        if [[ -x "$hook" ]]; then
+            local hook_name
+            hook_name="$(basename "$hook")"
+            echo "==> pre-commit [d]: running $hook_name" >&2
+            if ! "$hook" < /dev/null >&2; then
+                echo "ERROR: Drop-in hook $hook_name failed." >&2
+                status=1
+            fi
+        fi
+    done
+    return "$status"
+}
+
+# --- 3. Module Runner & Dispatcher -------------------------------------------
+
+MODULES=("version" "export_sync" "ruff" "mypy" "tests" "build" "directory_hooks")
+
+is_module_skipped() {
+    local mod="$1"
+    local env_var="SKIP_${mod^^}"
+    env_var="${env_var//-/_}"
+    if [[ "${!env_var:-0}" == "1" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+run_module() {
+    local mod="$1"
+    if is_module_skipped "$mod"; then
+        echo "pre-commit: skipping module [$mod] (disabled via SKIP_${mod^^}=1)"
+        return 0
+    fi
+
+    case "$mod" in
+        version)         module_version ;;
+        export_sync)     module_export_sync ;;
+        ruff)            module_ruff ;;
+        mypy)            module_mypy ;;
+        tests)           module_tests ;;
+        build)           module_build ;;
+        directory_hooks) module_directory_hooks ;;
+        *)
+            echo "ERROR: Unknown module '$mod'" >&2
+            return 1
+            ;;
+    esac
+}
+
+# --- 4. CLI Argument Parsing -------------------------------------------------
+
+TARGET_MODULE=""
+
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help)
+            cat <<EOF
+pre-commit v${__VERSION__} - modular git pre-commit hook
+
+Usage:
+  hooks/pre-commit [OPTIONS]
+
+Options:
+  -h, --help           Show this help message and exit
+  --list-modules       List all available check modules
+  --run=<module>       Run only the specified module
+  --version            Show hook version and exit
+
+Modules:
+  version              Validate version stamps via ./_check_version (if present)
+  export_sync          Validate lazy exports via ./_export_sync --check (if present)
+  ruff                 Run 'ruff check ddpico tests' on the whole package
+  mypy                 Run 'mypy ddpico' type checking
+  tests                Run test suite (./_tests --quick or python3 -m unittest)
+  build                Run ./_build (runs when PRE_COMMIT_BUILD=1 or --run=build)
+  directory_hooks      Run custom scripts in hooks/pre-commit.d/*.sh
+
+Environment Overrides:
+  SKIP_HOOKS=1              Skip all pre-commit modules
+  SKIP_<MODULE>=1           Skip specific module (e.g. SKIP_TESTS=1, SKIP_RUFF=1, SKIP_MYPY=1)
+  PRE_COMMIT_FULL_TESTS=1   Run full _tests (unittest + ruff + mypy)
+  PRE_COMMIT_BUILD=1        Enable the build verification module
+EOF
+            exit 0
+            ;;
+        --version)
+            echo "pre-commit v${__VERSION__}"
+            exit 0
+            ;;
+        --list-modules)
+            echo "Available pre-commit modules:"
+            for mod in "${MODULES[@]}"; do
+                echo "  - $mod"
+            done
+            exit 0
+            ;;
+        --run=*)
+            TARGET_MODULE="${arg#*=}"
+            ;;
+        *)
+            echo "Unknown argument: $arg" >&2
+            echo "Run 'hooks/pre-commit --help' for usage." >&2
+            exit 1
+            ;;
+    esac
+done
+
+# --- 5. Main Execution Flow --------------------------------------------------
+
+if [[ -n "$TARGET_MODULE" ]]; then
+    run_module "$TARGET_MODULE"
+    exit $?
+fi
+
+# Run all registered modules in order
+for mod in "${MODULES[@]}"; do
+    if ! run_module "$mod"; then
+        exit 1
+    fi
+done
+
+exit 0
