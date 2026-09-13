@@ -33,7 +33,7 @@ import socket
 import subprocess
 import sys
 import time
-__version__ = "2.1.202609121215Z"
+__version__ = "2.2.202609130748Z"
 
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
@@ -58,8 +58,18 @@ MAX_MSG = 200
 SPINNER_RE = re.compile(r"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]")
 
 
-def clean_title(text):
-    """Tab title without transient spinner glyphs (agents animate one while busy)."""
+def clean_title(text: str) -> str:
+    """Tab title without transient spinner glyphs (agents animate one while busy).
+
+    usage: clean_title <TEXT>
+    returns: The cleaned title, or "" when text is empty.
+
+    Args:
+        text (str): Raw tab title, possibly with transient spinner glyphs.
+
+    Example:
+        clean_title("π Refactoring auth ⠹")
+    """
     return re.sub(r"\s{2,}", " ", SPINNER_RE.sub(" ", text or "")).strip()
 
 
@@ -67,12 +77,35 @@ def clean_title(text):
 # state: one JSON card per agent under ~/.local/state/agent-board/
 # --------------------------------------------------------------------------
 
-def card_path(pane_id):
+def card_path(pane_id: str) -> str:
+    """Filesystem path of the JSON state card for a pane.
+
+    usage: card_path <PANE_ID>
+    returns: "<safe>.json" under STATE_DIR, unsafe characters replaced with "_".
+
+    Args:
+        pane_id (str): Pane identifier used as the card file stem.
+
+    Example:
+        card_path("p-1a2b")
+    """
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", pane_id)
     return os.path.join(STATE_DIR, safe + ".json")
 
 
-def read_card(path):
+def read_card(path: str) -> dict | None:
+    """Load one JSON card file.
+
+    usage: read_card <PATH>
+    returns: The card as a dict, or None when unreadable or invalid.
+    errors: None on OSError (missing/unreadable file) or ValueError (invalid JSON).
+
+    Args:
+        path (str): Path to a card JSON file.
+
+    Example:
+        card = read_card(card_path("p-1a2b"))
+    """
     try:
         with open(path) as f:
             card = json.load(f)
@@ -81,7 +114,15 @@ def read_card(path):
         return None
 
 
-def load_cards():
+def load_cards() -> dict:
+    """Read every card file in STATE_DIR.
+
+    usage: load_cards
+    returns: Dict mapping pane_id to its card; empty when the directory is unreadable.
+
+    Example:
+        cards = load_cards()
+    """
     cards = {}
     try:
         names = os.listdir(STATE_DIR)
@@ -96,7 +137,19 @@ def load_cards():
     return cards
 
 
-def save_card(card):
+def save_card(card: dict) -> None:
+    """Atomically write one card to its JSON file under STATE_DIR.
+
+    usage: save_card <CARD>
+    returns: None on success.
+    errors: OSError when STATE_DIR cannot be created or the card cannot be written.
+
+    Args:
+        card (dict): Card mapping; must contain "pane_id".
+
+    Example:
+        save_card({"pane_id": "p-1a2b", "status": "running tests", "log": []})
+    """
     os.makedirs(STATE_DIR, exist_ok=True)
     path = card_path(card["pane_id"])
     tmp = path + ".tmp"
@@ -105,7 +158,18 @@ def save_card(card):
     os.replace(tmp, path)
 
 
-def drop_card(pane_id):
+def drop_card(pane_id: str) -> None:
+    """Delete the card file for a pane, ignoring a missing file.
+
+    usage: drop_card <PANE_ID>
+    returns: None; a missing card file is silently ignored.
+
+    Args:
+        pane_id (str): Pane whose card should be removed.
+
+    Example:
+        drop_card("p-1a2b")
+    """
     try:
         os.remove(card_path(pane_id))
     except OSError:
@@ -116,8 +180,19 @@ def drop_card(pane_id):
 # herdr snapshot: the authoritative agent registry
 # --------------------------------------------------------------------------
 
-def herdr_agents(herdr_bin):
-    """(live agents, snapshot tabs), or (None, []) when unreachable."""
+def herdr_agents(herdr_bin: str) -> tuple[list | None, list]:
+    """(live agents, snapshot tabs), or (None, []) when unreachable.
+
+    usage: herdr_agents <HERDR_BIN>
+    returns: (agents, tabs) lists parsed from the herdr api snapshot on success.
+    errors: (None, []) when herdr exits nonzero, cannot be run, or returns malformed JSON.
+
+    Args:
+        herdr_bin (str): Path or name of the herdr binary to query.
+
+    Example:
+        agents, tabs = herdr_agents("herdr")
+    """
     try:
         out = subprocess.run([herdr_bin, "api", "snapshot"],
                              capture_output=True, text=True, timeout=10)
@@ -134,7 +209,20 @@ def herdr_agents(herdr_bin):
         return None, []
 
 
-def herdr_match(agents, pane_id, tab_id):
+def herdr_match(agents: list | None, pane_id: str, tab_id: str) -> dict | None:
+    """Find the herdr agent matching a pane or tab id.
+
+    usage: herdr_match <AGENTS> <PANE_ID> <TAB_ID>
+    returns: The matching agent dict, or None when no entry matches.
+
+    Args:
+        agents (list, optional): herdr agent dicts; None or empty searches nothing.
+        pane_id (str): Pane id to match; empty skips this criterion.
+        tab_id (str): Tab id to match; empty skips this criterion.
+
+    Example:
+        agent = herdr_match(agents, "p-1a2b", "")
+    """
     for a in agents or []:
         if pane_id and a.get("pane_id") == pane_id:
             return a
@@ -147,7 +235,15 @@ def herdr_match(agents, pane_id, tab_id):
 # agent side: `agent_board.py note ...`
 # --------------------------------------------------------------------------
 
-def self_pane_id():
+def self_pane_id() -> str:
+    """Derive this process's pane id without contacting herdr.
+
+    usage: self_pane_id
+    returns: $HERDR_PANE_ID, "ext-<tty basename>", or "ext-anon-<ppid>".
+
+    Example:
+        pane = self_pane_id()
+    """
     env = os.environ.get("HERDR_PANE_ID")
     if env:
         return env
@@ -161,8 +257,19 @@ def self_pane_id():
     return "ext-anon-%d" % os.getppid()
 
 
-def parse_reset(text, now):
-    """--reset value: ISO time, a duration (2d 4h 30m / 90m), or seconds."""
+def parse_reset(text: str | None, now: float) -> float | None:
+    """--reset value: ISO time, a duration (2d 4h 30m / 90m), or seconds.
+
+    usage: parse_reset <TEXT> <NOW>
+    returns: Absolute epoch timestamp of the reset, or None when empty/unparseable.
+
+    Args:
+        text (str, optional): Raw --reset value; None or empty yields None.
+        now (float): Current epoch time, the base for durations and bare seconds.
+
+    Example:
+        reset_at = parse_reset("2d 3h", time.time())
+    """
     t = (text or "").strip()
     if not t:
         return None
@@ -191,7 +298,20 @@ def parse_reset(text, now):
         return None
 
 
-def cmd_note(ns, herdr_bin):
+def cmd_note(ns: argparse.Namespace, herdr_bin: str) -> int:
+    """Handle `note <action>`: create, update, or remove this agent's card.
+
+    usage: cmd_note <NS> <HERDR_BIN>
+    returns: 0 after posting, updating, or removing the card.
+    errors: 2 when -m/--msg is missing for an action that requires it.
+
+    Args:
+        ns (argparse.Namespace): Parsed `note` subcommand arguments.
+        herdr_bin (str): herdr binary used to look up the agent snapshot.
+
+    Example:
+        cmd_note(ns, "herdr")
+    """
     pane = ns.pane or self_pane_id()
     tab = ns.tab if ns.tab is not None else (
         os.environ.get("HERDR_TAB_ID") or "" if ns.pane is None else "")
@@ -272,7 +392,18 @@ AGENT_ALIASES = {
 }
 
 
-def rss_str(kb):
+def rss_str(kb: int | None) -> str:
+    """Format a resident-set size in KiB for the meta line.
+
+    usage: rss_str <KB>
+    returns: "" when kb is None, else "<N>M" or "<X.X>G".
+
+    Args:
+        kb (int, optional): RSS in KiB from /proc/<pid>/status; None means unknown.
+
+    Example:
+        rss_str(3_500_000)
+    """
     if kb is None:
         return ""
     if kb < 1024 * 1024:
@@ -280,8 +411,16 @@ def rss_str(kb):
     return f"{kb / 1024 / 1024:.1f}G"
 
 
-def scan_procs():
-    """One /proc pass: (by_pts_basename, by_(comm, cwd)) of (pid, comm, rss_kb)."""
+def scan_procs() -> tuple[dict, dict]:
+    """One /proc pass: (by_pts_basename, by_(comm, cwd)) of (pid, comm, rss_kb).
+
+    usage: scan_procs
+    returns: (by_tty, by_kind) mapping pts basenames and (comm, cwd) pairs
+        to lists of (pid, comm, rss_kb) tuples.
+
+    Example:
+        by_tty, by_kind = scan_procs()
+    """
     by_tty, by_kind = {}, {}
     for d in glob.glob("/proc/[0-9]*"):
         try:
@@ -311,8 +450,20 @@ def scan_procs():
     return by_tty, by_kind
 
 
-def resolve_proc(kind, cwd, procs):
-    """Best-effort (pid, rss_kb) for a herdr agent: comm aliases + cwd match."""
+def resolve_proc(kind: str, cwd: str, procs: tuple | None) -> tuple[int | None, int | None]:
+    """Best-effort (pid, rss_kb) for a herdr agent: comm aliases + cwd match.
+
+    usage: resolve_proc <KIND> <CWD> <PROCS>
+    returns: (pid, rss_kb) of the largest-RSS candidate, or (None, None).
+
+    Args:
+        kind (str): Agent kind label looked up in AGENT_ALIASES.
+        cwd (str): Working directory matched against process cwds.
+        procs (tuple, optional): (by_tty, by_kind) from scan_procs(); None/empty short-circuits.
+
+    Example:
+        pid, rss = resolve_proc("omp", "/home/fmann/projects/auth", procs)
+    """
     if not procs:
         return None, None
     by_tty, by_kind = procs
@@ -325,8 +476,19 @@ def resolve_proc(kind, cwd, procs):
     return (best[0], best[2]) if best else (None, None)
 
 
-def resolve_ext_proc(pane_id, procs):
-    """ext-<pts basename> card: find the agent process holding that tty."""
+def resolve_ext_proc(pane_id: str, procs: tuple | None) -> tuple[int | None, int | None]:
+    """ext-<pts basename> card: find the agent process holding that tty.
+
+    usage: resolve_ext_proc <PANE_ID> <PROCS>
+    returns: (pid, rss_kb) of the largest-RSS known agent on that tty, or (None, None).
+
+    Args:
+        pane_id (str): Card pane id starting with "ext-"; others short-circuit to (None, None).
+        procs (tuple, optional): (by_tty, by_kind) from scan_procs(); None short-circuits.
+
+    Example:
+        pid, rss = resolve_ext_proc("ext-3", procs)
+    """
     if not procs or not pane_id.startswith("ext-"):
         return None, None
     known = set()
@@ -343,13 +505,25 @@ def resolve_ext_proc(pane_id, procs):
 # viewer: merge snapshot + cards into columns
 # --------------------------------------------------------------------------
 
-def build_columns(agents, cards, now, stale_after, procs=None, tabs=None):
+def build_columns(agents: list | None, cards: dict, now: float, stale_after: float,
+                  procs: tuple | None = None, tabs: list | None = None) -> list:
     """Merge herdr agents (liveness) with posted cards (free text).
 
-    `agents` may be None = snapshot unavailable; herdr-owned cards are then
-    hidden (unknown liveness) but not deleted.  `tabs` is the snapshot's
-    tab list; every tab without a detected agent gets its own column
-    (agent kind unknown) so no herdr tab can go missing from the board.
+    usage: build_columns <AGENTS> <CARDS> <NOW> <STALE_AFTER> [PROCS] [TABS]
+    returns: Column dicts sorted by status priority, then card age.
+
+    Args:
+        agents (list, optional): herdr agent dicts; None = snapshot unavailable, so
+            herdr-owned cards are hidden (unknown liveness) but not deleted.
+        cards (dict): Posted cards keyed by pane_id.
+        now (float): Current epoch time, base for card ages and staleness.
+        stale_after (float): External card age in seconds before the "stale" chip.
+        procs (tuple, optional): (by_tty, by_kind) from scan_procs() for pid/RSS lookup.
+        tabs (list, optional): Snapshot tab list; every tab without a detected agent gets
+            its own column (agent kind unknown) so no herdr tab can go missing.
+
+    Example:
+        cols = build_columns(agents, cards, time.time(), 600.0, procs=procs, tabs=tabs)
     """
     labels = {t["tab_id"]: t.get("label") or "" for t in tabs or []
               if t.get("tab_id")}
@@ -433,8 +607,20 @@ def build_columns(agents, cards, now, stale_after, procs=None, tabs=None):
     return cols
 
 
-def sweep(cards, agents):
-    """Delete herdr-owned cards whose pane has closed (agent stopped)."""
+def sweep(cards: dict, agents: list | None) -> None:
+    """Delete herdr-owned cards whose pane has closed (agent stopped).
+
+    usage: sweep <CARDS> <AGENTS>
+    returns: None; matching card files are removed, or nothing happens when
+        agents is None (snapshot unavailable: keep everything).
+
+    Args:
+        cards (dict): Cards keyed by pane_id, as returned by load_cards().
+        agents (list, optional): Live herdr agent dicts; None disables sweeping.
+
+    Example:
+        sweep(cards, agents)
+    """
     if agents is None:
         return  # snapshot unavailable: keep everything
     live = {str(a.get("pane_id")) for a in agents}
@@ -443,7 +629,18 @@ def sweep(cards, agents):
             drop_card(pane)
 
 
-def age_str(seconds):
+def age_str(seconds: float | None) -> str:
+    """Humanize a card age for the meta line.
+
+    usage: age_str <SECONDS>
+    returns: "" when seconds is None, else e.g. "42s", "5m", or "3h07m".
+
+    Args:
+        seconds (float, optional): Age in seconds; None means unknown.
+
+    Example:
+        age_str(12540.0)
+    """
     if seconds is None:
         return ""
     if seconds < 60:
@@ -453,8 +650,18 @@ def age_str(seconds):
     return f"{int(seconds // 3600)}h{int(seconds % 3600 // 60):02d}m"
 
 
-def dur_str(seconds):
-    """Countdown as d hh:mm:ss; days shown only when nonzero."""
+def dur_str(seconds: float) -> str:
+    """Countdown as d hh:mm:ss; days shown only when nonzero.
+
+    usage: dur_str <SECONDS>
+    returns: Formatted countdown, e.g. "04:12:33" or "2d 04:12:33".
+
+    Args:
+        seconds (float): Seconds remaining; negative values are clamped to 0.
+
+    Example:
+        dur_str(2 * 86400 + 3 * 3600 + 600)
+    """
     seconds = max(0, int(seconds))
     days, rem = divmod(seconds, 86400)
     hours, rem = divmod(rem, 3600)
@@ -462,8 +669,20 @@ def dur_str(seconds):
     return (f"{days}d " if days else "") + f"{hours:02d}:{mins:02d}:{secs:02d}"
 
 
-def status_text(card, now):
-    """Card status with the live quota-reset countdown appended."""
+def status_text(card: dict, now: float) -> str:
+    """Card status with the live quota-reset countdown appended.
+
+    usage: status_text <CARD> <NOW>
+    returns: The status line, plus " · Resets in <countdown>" when a reset is set.
+
+    Args:
+        card (dict): Card mapping with optional "status" and "stopped" keys.
+        now (float): Current epoch time for the countdown.
+
+    Example:
+        status_text({"status": "quota reached", "stopped": {"reset": 1757800000.0}},
+                    1757796400.0)
+    """
     text = card.get("status") or ""
     reset = (card.get("stopped") or {}).get("reset")
     if reset:
@@ -471,7 +690,18 @@ def status_text(card, now):
     return text
 
 
-def chip_str(col):
+def chip_str(col: dict) -> str:
+    """Render a column's chip symbol and label, "*" prefixed when focused.
+
+    usage: chip_str <COL>
+    returns: e.g. "*● working" or "○ idle".
+
+    Args:
+        col (dict): Column dict with "focused" and "chip" keys.
+
+    Example:
+        chip_str({"focused": True, "chip": "working"})
+    """
     star = "*" if col["focused"] else ""
     return f"{star}{CHIP_SYMBOL.get(col['chip'], '?')} {CHIP_LABEL[col['chip']]}"
 
@@ -486,8 +716,19 @@ AGENT_BADGE = {
 }
 
 
-def head_parts(col):
-    """Rule segments: chip state, grey (), magenta tab, cyan badge, white desc."""
+def head_parts(col: dict) -> list[tuple[str, str | None]]:
+    """Rule segments: chip state, grey (), magenta tab, cyan badge, white desc.
+
+    usage: head_parts <COL>
+    returns: (text, kind) segments; kind is an ACCENT_ANSI key or None for plain.
+
+    Args:
+        col (dict): Column dict with chip, tab_name, agent, and header keys.
+
+    Example:
+        head_parts({"focused": False, "chip": "working", "tab_name": "auth",
+                    "agent": "omp", "header": "π refactoring"})
+    """
     parts = [(f"({chip_str(col)})", None)]
     if col.get("tab_name"):
         parts.append((" (", "grey"))
@@ -509,7 +750,19 @@ def head_parts(col):
     return parts
 
 
-def meta_str(col):
+def meta_str(col: dict) -> str:
+    """Build the "agent · tab · pid · mem · updated" metadata line.
+
+    usage: meta_str <COL>
+    returns: " · "-joined metadata string, omitting absent fields.
+
+    Args:
+        col (dict): Column dict with agent, tab, pid, rss, and age keys.
+
+    Example:
+        meta_str({"agent": "omp", "tab": "t-9", "pid": 4242,
+                  "rss": 3500000, "age": 90.0})
+    """
     parts = [col["agent"]] if col["agent"] else []
     if col["tab"]:
         parts.append(col["tab"])
@@ -526,20 +779,57 @@ def meta_str(col):
 # one-shot ANSI render
 # --------------------------------------------------------------------------
 
-def compact_parts(col):
-    """Compact-line segments: rule head plus the current status tail."""
+def compact_parts(col: dict) -> list[tuple[str, str | None]]:
+    """Compact-line segments: rule head plus the current status tail.
+
+    usage: compact_parts <COL>
+    returns: (text, kind) segments ending with the status text when present.
+
+    Args:
+        col (dict): Column dict; its "text" is appended when non-empty.
+
+    Example:
+        compact_parts({"focused": False, "chip": "working", "text": "todo 2/5"})
+    """
     parts = head_parts(col)
     if col["text"]:
         parts += [(" · ", "grey"), (col["text"], "desc")]
     return parts
 
 
-def compact_line(col, width):
-    """Plain one-line summary for one-shot / service frames."""
+def compact_line(col: dict, width: int) -> str:
+    """Plain one-line summary for one-shot / service frames.
+
+    usage: compact_line <COL> <WIDTH>
+    returns: Concatenated segment texts truncated to width columns.
+
+    Args:
+        col (dict): Column dict to summarize.
+        width (int): Maximum line width in columns.
+
+    Example:
+        compact_line(cols[0], 58)
+    """
     return "".join(t for t, _ in compact_parts(col))[:width]
 
 
-def render_frame(cols, herdr_ok, color, compact=False, width=118):
+def render_frame(cols: list, herdr_ok: bool, color: bool,
+                 compact: bool = False, width: int = 118) -> str:
+    """Render the whole board as a text frame.
+
+    usage: render_frame <COLS> <HERDR_OK> <COLOR> [COMPACT] [WIDTH]
+    returns: The frame text: a header line plus one block per agent (or compact rows).
+
+    Args:
+        cols (list): Column dicts from build_columns().
+        herdr_ok (bool): False appends "herdr snapshot unreachable" to the header.
+        color (bool): When True, segments are wrapped in ANSI color escapes.
+        compact (bool, optional): One line per agent in two columns. Defaults to False.
+        width (int, optional): Frame width in columns. Defaults to 118.
+
+    Example:
+        print(render_frame(cols, herdr_ok=True, color=False, compact=True))
+    """
     ansi = {1: "32", 2: "31", 3: "36", 4: "33"}
     on = (lambda code, s: f"\x1b[{code}m{s}\x1b[0m") if color else (lambda code, s: s)
     active = sum(1 for c in cols
@@ -575,7 +865,20 @@ def render_frame(cols, herdr_ok, color, compact=False, width=118):
     return "\n".join(lines)
 
 
-def render_once(cols, herdr_ok, compact=False):
+def render_once(cols: list, herdr_ok: bool, compact: bool = False) -> None:
+    """Print one ANSI-colored frame to stdout (--once mode).
+
+    usage: render_once <COLS> <HERDR_OK> [COMPACT]
+    returns: None; the frame is printed to stdout in color.
+
+    Args:
+        cols (list): Column dicts from build_columns().
+        herdr_ok (bool): False appends "herdr snapshot unreachable" to the header.
+        compact (bool, optional): One line per agent in two columns. Defaults to False.
+
+    Example:
+        render_once(cols, herdr_ok=True, compact=True)
+    """
     print(render_frame(cols, herdr_ok, color=True, compact=compact))
 
 
@@ -583,8 +886,19 @@ def render_once(cols, herdr_ok, compact=False):
 # fullscreen TUI
 # --------------------------------------------------------------------------
 
-def accent_attr(kind, chip):
-    """curses attr for a rule segment kind; chip attr for the state."""
+def accent_attr(kind: str | None, chip: int) -> int:
+    """curses attr for a rule segment kind; chip attr for the state.
+
+    usage: accent_attr <KIND> <CHIP>
+    returns: A curses attribute int usable with addnstr().
+
+    Args:
+        kind (str, optional): Segment kind ("badge", "tab", "grey", "desc") or None.
+        chip (int): Fallback curses attribute used when kind is None.
+
+    Example:
+        accent_attr("badge", curses.A_BOLD)
+    """
     if kind == "badge":
         return curses.color_pair(3) | curses.A_BOLD
     if kind == "tab":
@@ -596,8 +910,24 @@ def accent_attr(kind, chip):
     return chip
 
 
-def draw_parts(stdscr, y, x, parts, chip, limit):
-    """Draw (text, kind) segments left to right within `limit` columns."""
+def draw_parts(stdscr, y: int, x: int, parts: list[tuple[str, str | None]],
+               chip: int, limit: int) -> int:
+    """Draw (text, kind) segments left to right within `limit` columns.
+
+    usage: draw_parts <STDSCR> <Y> <X> <PARTS> <CHIP> <LIMIT>
+    returns: The x position after the last drawn segment.
+
+    Args:
+        stdscr: curses window to draw on.
+        y (int): Row to draw on.
+        x (int): Starting column.
+        parts (list): (text, kind) segments from head_parts()/compact_parts().
+        chip (int): Fallback curses attribute for unstyled segments.
+        limit (int): Rightmost column; drawing stops there.
+
+    Example:
+        x = draw_parts(stdscr, 2, 0, head_parts(col), chip, 60)
+    """
     for text, kind in parts:
         if x >= limit:
             break
@@ -607,7 +937,20 @@ def draw_parts(stdscr, y, x, parts, chip, limit):
     return x
 
 
-def column_lines(col, width, num=0):
+def column_lines(col: dict, width: int, num: int = 0) -> list[tuple[str, int]]:
+    """Pre-render one column as (text, attr) lines for the fullscreen TUI.
+
+    usage: column_lines <COL> <WIDTH> [NUM]
+    returns: Lines: rule head, meta line, optional status and trail, closing "└".
+
+    Args:
+        col (dict): Column dict from build_columns().
+        width (int): Maximum rule width in columns.
+        num (int, optional): 1-based column number shown in the rule. Defaults to 0.
+
+    Example:
+        block = column_lines(cols[0], 80, num=1)
+    """
     chip = curses.color_pair(CHIP_COLOR.get(col["chip"], 0)) | curses.A_BOLD
     lines = []
     x = 0
@@ -628,8 +971,22 @@ def column_lines(col, width, num=0):
     return lines
 
 
-def column_at_click(row_map, my, mx, compact, half):
-    """Column index under a mouse click, or None when nothing was hit."""
+def column_at_click(row_map: dict, my: int, mx: int, compact: bool, half: int) -> int | None:
+    """Column index under a mouse click, or None when nothing was hit.
+
+    usage: column_at_click <ROW_MAP> <MY> <MX> <COMPACT> <HALF>
+    returns: Column index; in compact mode the right half selects the row's second column.
+
+    Args:
+        row_map (dict): Row (y) to column index, or (left, right) pair in compact mode.
+        my (int): Click row.
+        mx (int): Click column.
+        compact (bool): Whether the compact two-column layout is active.
+        half (int): Width of each compact half.
+
+    Example:
+        ci = column_at_click(row_map, my, mx, compact, half)
+    """
     hit = row_map.get(my)
     if hit is None:
         return None
@@ -641,7 +998,23 @@ def column_at_click(row_map, my, mx, compact, half):
     return hit
 
 
-def run_tui(stdscr, herdr_bin, poll_period, stale_after, compact=False):
+def run_tui(stdscr, herdr_bin: str, poll_period: float, stale_after: float,
+            compact: bool = False) -> None:
+    """Fullscreen curses board loop: poll, render, and handle keys/mouse.
+
+    usage: run_tui <STDSCR> <HERDR_BIN> <POLL_PERIOD> <STALE_AFTER> [COMPACT]
+    returns: None when the user quits with q/Q; runs until then.
+
+    Args:
+        stdscr: curses standard screen handed over by curses.wrapper().
+        herdr_bin (str): herdr binary for snapshots and tab focus.
+        poll_period (float): Seconds between snapshot/card refreshes.
+        stale_after (float): External card age in seconds before the "stale" chip.
+        compact (bool, optional): One line per agent in two columns. Defaults to False.
+
+    Example:
+        curses.wrapper(run_tui, "herdr", 2.0, 600.0, False)
+    """
     curses.curs_set(0)
     curses.start_color()
     curses.use_default_colors()
@@ -782,8 +1155,21 @@ def run_tui(stdscr, herdr_bin, poll_period, stale_after, compact=False):
             continue
 
 
-def run_serve(herdr_bin, poll_period, stale_after, frame_path):
-    """Headless loop for the systemd service: keep the frame file fresh."""
+def run_serve(herdr_bin: str, poll_period: float, stale_after: float, frame_path: str) -> None:
+    """Headless loop for the systemd service: keep the frame file fresh.
+
+    usage: run_serve <HERDR_BIN> <POLL_PERIOD> <STALE_AFTER> <FRAME_PATH>
+    returns: None; this loop never exits.
+
+    Args:
+        herdr_bin (str): herdr binary for the liveness snapshot.
+        poll_period (float): Seconds between frame re-renders (minimum 1, enforced by main()).
+        stale_after (float): External card age in seconds before the "stale" chip.
+        frame_path (str): Path of the frame file rewritten atomically each cycle.
+
+    Example:
+        run_serve("herdr", 2.0, 600.0, FRAME_PATH)
+    """
     while True:
         agents, tabs = herdr_agents(herdr_bin)
         cards = load_cards()
@@ -834,7 +1220,16 @@ examples:
 """
 
 
-def _use_color():
+def _use_color() -> bool:
+    """Decide whether ANSI color escapes should be emitted.
+
+    usage: _use_color
+    returns: False with NO_COLOR, True with FORCE_COLOR, else stdout isatty().
+
+    Example:
+        if _use_color():
+            print("\x1b[1mbold\x1b[0m")
+    """
     if os.environ.get("NO_COLOR"):
         return False
     if os.environ.get("FORCE_COLOR"):
@@ -842,8 +1237,18 @@ def _use_color():
     return sys.stdout.isatty()
 
 
-def colorize_help(text):
-    """ANSI coloring for argparse output: headings, flags, metavars."""
+def colorize_help(text: str) -> str:
+    """ANSI coloring for argparse output: headings, flags, metavars.
+
+    usage: colorize_help <TEXT>
+    returns: The text with ANSI escapes, or unchanged when color is disabled.
+
+    Args:
+        text (str): argparse help or usage output to colorize.
+
+    Example:
+        print(colorize_help(parser.format_help()))
+    """
     if not _use_color():
         return text
     flag = lambda m: f"\x1b[36m{m.group(1)}\x1b[0m"
@@ -859,14 +1264,41 @@ def colorize_help(text):
 class _ColoredParser(argparse.ArgumentParser):
     """argparse parser that colorizes its help/usage on a TTY."""
 
-    def format_help(self):
+    def format_help(self) -> str:
+        """Return the parser help text, colorized when the output is a TTY.
+
+        usage: format_help
+        returns: The colorized help text as a string.
+
+        Example:
+            help_text = _ColoredParser(prog="agent_board").format_help()
+        """
         return colorize_help(super().format_help())
 
-    def format_usage(self):
+    def format_usage(self) -> str:
+        """Return the parser usage line, colorized when the output is a TTY.
+
+        usage: format_usage
+        returns: The colorized usage line as a string.
+
+        Example:
+            usage_line = _ColoredParser(prog="agent_board").format_usage()
+        """
         return colorize_help(super().format_usage())
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
+    """Parse arguments and dispatch: TUI, one-shot frame, note posting, or service loop.
+
+    usage: main [ARGV]
+    returns: Process exit code: 0 on success, 2 on a missing -m/--msg.
+
+    Args:
+        argv (list, optional): Command-line arguments; None uses sys.argv[1:]. Defaults to None.
+
+    Example:
+        sys.exit(main(["note", "step", "-m", "todo 2/5"]))
+    """
     ap = _ColoredParser(
         prog="agent_board", description=__doc__, epilog=HELP_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter)

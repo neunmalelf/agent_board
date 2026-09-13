@@ -23,7 +23,7 @@ import subprocess
 import sys
 import time
 
-__version__ = "1.0.202609090652Z"
+__version__ = "1.1.202609130748Z"
 
 # Agent binaries herdr recognizes; used to spot external (non-herdr) agents.
 KNOWN_AGENTS = {
@@ -33,8 +33,20 @@ KNOWN_AGENTS = {
 }
 
 
-def run_json(cmd, timeout=10):
-    """Run a command, return parsed JSON, or None on any failure."""
+def run_json(cmd: list[str], timeout: float = 10) -> dict | None:
+    """Run a command, return parsed JSON, or None on any failure.
+
+    usage: run_json <CMD> [TIMEOUT]
+    returns: Parsed stdout as a dict, or None when the command exits
+        nonzero, times out, raises OSError, or emits invalid JSON.
+
+    Args:
+        cmd (list[str]): Command and arguments to execute.
+        timeout (float, optional): Seconds before the command is killed. Defaults to 10.
+
+    Example:
+        run_json(["herdr", "api", "snapshot"], timeout=5)
+    """
     try:
         out = subprocess.run(cmd, capture_output=True, text=True,
                              timeout=timeout)
@@ -45,7 +57,18 @@ def run_json(cmd, timeout=10):
         return None
 
 
-def json_loads(s):
+def json_loads(s: str) -> dict | None:
+    """Parse a JSON string, returning None when the input is invalid.
+
+    usage: json_loads <S>
+    returns: The parsed JSON object, or None when s is not valid JSON.
+
+    Args:
+        s (str): JSON text, typically a captured command's stdout.
+
+    Example:
+        json_loads('{"result": {"snapshot": {"agents": []}}}')
+    """
     import json
     try:
         return json.loads(s)
@@ -57,8 +80,19 @@ def json_loads(s):
 # herdr source
 # --------------------------------------------------------------------------
 
-def herdr_agents(herdr_bin):
-    """Return list of agent dicts from `herdr api snapshot`, or [] on error."""
+def herdr_agents(herdr_bin: str) -> list[dict]:
+    """Return list of agent dicts from `herdr api snapshot`, or [] on error.
+
+    usage: herdr_agents <HERDR_BIN>
+    returns: List of agent dicts from the herdr snapshot, or [] when the
+        snapshot call fails or reports no agents.
+
+    Args:
+        herdr_bin (str): Name or path of the herdr binary.
+
+    Example:
+        herdr_agents("herdr")
+    """
     d = run_json([herdr_bin, "api", "snapshot"])
     if not d:
         return []
@@ -66,8 +100,21 @@ def herdr_agents(herdr_bin):
     return snap.get("agents", []) or []
 
 
-def needs_attention(status, focused):
-    """True when an agent pane wants the user's eyes."""
+def needs_attention(status: str, focused: bool) -> bool:
+    """True when an agent pane wants the user's eyes.
+
+    usage: needs_attention <STATUS> <FOCUSED>
+    returns: True when the pane is unfocused and its status is blocked,
+        done, or idle.
+
+    Args:
+        status (str): Agent status reported by herdr ("blocked", "done",
+            "idle", or other).
+        focused (bool): Whether the agent's pane is currently focused.
+
+    Example:
+        needs_attention("blocked", focused=False)
+    """
     if focused:
         return False  # you are already looking at it
     if status == "blocked":
@@ -79,7 +126,20 @@ def needs_attention(status, focused):
     return False
 
 
-def herdr_label(a):
+def herdr_label(a: dict) -> str:
+    """Build the "workspace · tab · title" label for a herdr agent record.
+
+    usage: herdr_label <A>
+    returns: Label joining workspace id, tab id, and the stripped terminal
+        title (falling back to the raw title, then to "").
+
+    Args:
+        a (dict): One agent record as returned by herdr_agents().
+
+    Example:
+        herdr_label({"workspace_id": "w1", "tab_id": "t2",
+                     "terminal_title": "omp"})
+    """
     ws = a.get("workspace_id", "?")
     tab = a.get("tab_id", "?")
     title = a.get("terminal_title_stripped") or a.get("terminal_title") or ""
@@ -90,7 +150,19 @@ def herdr_label(a):
 # external (non-herdr) source
 # --------------------------------------------------------------------------
 
-def _descendants(pid):
+def _descendants(pid: int) -> set[int]:
+    """Collect a process pid and all of its transitive children.
+
+    usage: _descendants <PID>
+    returns: Set containing pid plus every descendant pid discovered via
+        /proc task children files.
+
+    Args:
+        pid (int): Root process id to start the walk from.
+
+    Example:
+        _descendants(1234)
+    """
     out = {pid}
     changed = True
     while changed:
@@ -108,15 +180,39 @@ def _descendants(pid):
     return out
 
 
-def _tty_of(pid):
+def _tty_of(pid: int) -> str | None:
+    """Resolve the controlling terminal of a process via /proc.
+
+    usage: _tty_of <PID>
+    returns: Symlink target of the process's fd/0 (e.g. "/dev/pts/3"),
+        or None when it cannot be read.
+
+    Args:
+        pid (int): Process id to inspect.
+
+    Example:
+        _tty_of(1234)
+    """
     try:
         return os.readlink(f"/proc/{pid}/fd/0")
     except OSError:
         return None
 
 
-def herdr_ttys(herdr_bin):
-    """Set of /dev/pts/N controlling ttys owned by herdr panes."""
+def herdr_ttys(herdr_bin: str) -> set[str]:
+    """Set of /dev/pts/N controlling ttys owned by herdr panes.
+
+    usage: herdr_ttys <HERDR_BIN>
+    returns: Set of /dev/pts/N paths for ttys held by herdr server
+        descendant processes.
+
+    Args:
+        herdr_bin (str): Name or path of the herdr binary (unused; kept for
+            a uniform source API).
+
+    Example:
+        herdr_ttys("herdr")
+    """
     sp = subprocess.run(["pgrep", "-f", "herdr server"],
                         capture_output=True, text=True)
     servers = [int(x) for x in sp.stdout.split() if x.isdigit()]
@@ -129,8 +225,20 @@ def herdr_ttys(herdr_bin):
     return ttys
 
 
-def external_agents(herdr_bin):
-    """List of (pid, comm, tty) for known agents running outside herdr."""
+def external_agents(herdr_bin: str) -> list[tuple[int, str, str]]:
+    """List of (pid, comm, tty) for known agents running outside herdr.
+
+    usage: external_agents <HERDR_BIN>
+    returns: List of (pid, comm, tty) tuples for KNOWN_AGENTS binaries
+        running interactively on a pts outside herdr.
+
+    Args:
+        herdr_bin (str): Name or path of the herdr binary, used to exclude
+            herdr-owned panes.
+
+    Example:
+        external_agents("herdr")
+    """
     owned = herdr_ttys(herdr_bin)
     found = []
     for p in glob.glob("/proc/[0-9]*"):
@@ -150,8 +258,19 @@ def external_agents(herdr_bin):
     return found
 
 
-def tty_idle_seconds(tty):
-    """Seconds since the pts device was last written, or None if unknown."""
+def tty_idle_seconds(tty: str) -> float | None:
+    """Seconds since the pts device was last written, or None if unknown.
+
+    usage: tty_idle_seconds <TTY>
+    returns: Seconds elapsed since the tty device's mtime, or None when
+        the device cannot be stat'ed.
+
+    Args:
+        tty (str): Path to a pts device, e.g. "/dev/pts/3".
+
+    Example:
+        tty_idle_seconds("/dev/pts/3")
+    """
     try:
         return time.time() - os.stat(tty).st_mtime
     except OSError:
@@ -162,7 +281,23 @@ def tty_idle_seconds(tty):
 # notification
 # --------------------------------------------------------------------------
 
-def notify(title, body, notify_cmd, dry_run):
+def notify(title: str, body: str, notify_cmd: str, dry_run: bool) -> None:
+    """Send a desktop notification, or print it instead when dry_run is set.
+
+    usage: notify <TITLE> <BODY> <NOTIFY_CMD> <DRY_RUN>
+    returns: None on success.
+
+    Args:
+        title (str): Notification title, e.g. "herdr: omp".
+        body (str): Notification body text.
+        notify_cmd (str): Path of the notification binary to invoke.
+        dry_run (bool): When True, print the notification to stdout instead
+            of running notify_cmd.
+
+    Example:
+        notify("external: claude", "pid 4321 · /dev/pts/5 · idle 12s",
+               "/usr/bin/notify-send", dry_run=True)
+    """
     if dry_run:
         print(f"[notify] {title} :: {body}", flush=True)
         return
@@ -173,7 +308,17 @@ def notify(title, body, notify_cmd, dry_run):
 # main loop
 # --------------------------------------------------------------------------
 
-def main():
+def main() -> int:
+    """Parse CLI arguments and run the agent-watch poll loop.
+
+    usage: main
+    returns: Process exit code; 0 after a single pass with --once.
+    errors: 2 when the configured herdr or notify binary is not found in
+        PATH.
+
+    Example:
+        sys.exit(main())
+    """
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--herdr-bin", default="herdr")
     ap.add_argument("--notify-cmd", default="notify-send")
