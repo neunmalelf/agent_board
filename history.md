@@ -6,6 +6,17 @@
 > alternatives. Rules: see `.agentrules` (History Rule) and
 > `docs/development.md`.
 
+## 2.4.20260915173031Z - 2026-09-15
+
+Release documentation:
+
+- **NEWS.md**: user-facing highlights per release (2.4, 2.3).
+- **ChangeLog.md**: all notable changes newest-first, derived from
+  `history.md` and the git log (1.0 → 2.4); points to `history.md` for
+  decisions.
+- **README.md**: Columns section documents herdr's custom-agent API for
+  agents outside the built-in list (freebuff) and the `FB` badge.
+
 ## 2.4.20260915172753Z - 2026-09-15
 
 Documentation: platform coverage, man/tldr install steps, stale paths:

@@ -61,10 +61,17 @@ Each live agent gets one column:
 - **Agent badge** = cyan agent symbol. omp's `π` and opencode's `OC`/
   `OpenCode` are colored in place when the tab title starts with them;
   agents whose titles carry no symbol get one prepended (agy → `AG`).
+  freebuff agents get the `FB` badge prepended.
 - **Tab coverage** = every herdr tab gets a column. Tabs whose agent
-  herdr could not detect (agent kind unknown) render as
-  `(? unknown) <tab label>` with no meta beyond the tab id, so tabs like
-  `freebuff -- mediadownloader_web` never vanish from the board.
+  herdr could not detect render as `(? unknown) <tab label>` with no
+  meta beyond the tab id, so tabs like `mediadownloader_webui` never
+  vanish from the board. Agents outside herdr's built-in list (e.g.
+  freebuff) can be classified via herdr's custom-agent API —
+  `herdr pane report-agent <pane> --source custom:<name> --agent <kind>
+  --state working|idle|blocked` — after which they render as a normal
+  column, including pid/mem resolution and their `AGENT_BADGE` badge.
+  Un-classified tabs that merely run non-agent processes stay
+  `(? unknown)` by design.
 - **pid + mem** — resolved per agent from `/proc` (herdr's snapshot carries
   no pid): matched by agent-kind alias + cwd, external cards by their pts
   tty.
