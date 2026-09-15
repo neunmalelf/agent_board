@@ -6,6 +6,12 @@
 > alternatives. Rules: see `.agentrules` (History Rule) and
 > `docs/development.md`.
 
+## 2.4.20260915184630Z - 2026-09-15
+
+README: the two live-board screenshots (`view.jpg` fullscreen,
+`view-compact.jpg` compact) are embedded as proper markdown images with
+alt text instead of bare file names.
+
 ## 2.4.20260915184045Z - 2026-09-15
 
 Bug fix — fullscreen TUI (normal view): the column head rendered one

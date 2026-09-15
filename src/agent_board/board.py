@@ -35,7 +35,7 @@ import sys
 import time
 from datetime import datetime
 
-__version__ = "2.4.20260915184045Z"
+__version__ = "2.4.20260915184630Z"
 
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),

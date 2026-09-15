@@ -11,6 +11,12 @@ It is a POSIX tool: Linux is fully supported, macOS works with reduced
 process discovery, and Windows is only usable inside WSL2 — see
 [Platforms](#platforms).
 
+Live board, fullscreen and compact:
+
+![agent_board fullscreen view](view.jpg)
+
+![agent_board view-compact, two columns](view-compact.jpg)
+
 Two small tools live in this project (both Python 3, stdlib only):
 
 | Tool | What it does |
