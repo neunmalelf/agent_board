@@ -1,21 +1,31 @@
 # agent_board
 
-Watch what your coding agents are doing -in one place, live.
+Watch what your coding agents are doing - in one place, live.
 
-agent_board is a tool on top of [Herdr](https://herdr.dev) -the terminal
+agent_board is a tool on top of [Herdr](https://herdr.dev) - the terminal
 workspace manager for coding agents. The board reads its liveness and
 status chips from herdr's session snapshot, and `agent-watch` watches the
 same source; herdr must be installed and in PATH.
 
 It is a POSIX tool: Linux is fully supported, macOS works with reduced
-process discovery, and Windows is only usable inside WSL2 -see
+process discovery, and Windows is only usable inside WSL2 - see
 [Platforms](#platforms).
 
-Live board, fullscreen and compact:
+## Live board:
+
+```bash
+agent_board view-compact
+```
+
+![agent_board view-compact, two columns](view-compact.jpg)
+
+
+```bash
+agent_board view
+```
 
 ![agent_board fullscreen view](view.jpg)
 
-![agent_board view-compact, two columns](view-compact.jpg)
 
 Two small tools live in this project (both Python 3, stdlib only):
 
@@ -67,7 +77,7 @@ Each live agent gets one column:
   ✓ done` from herdr's snapshot; `+ external` / `! stale` for cards
   outside herdr. `note input` (question/options for the user) shows the
   yellow `❯ needs input` chip; `note quota --reset <when>` shows the red
-  `■ stopped` chip with a live "Resets in d hh:mm:ss" countdown -both
+  `■ stopped` chip with a live "Resets in d hh:mm:ss" countdown - both
   clear on the agent's next step/update.
 - **Tab label** = herdr's own tab label (`tabs[].label` in the snapshot),
   shown in magenta inside light-grey parens after the chip; the
@@ -83,14 +93,14 @@ Each live agent gets one column:
   vanish from the board. Agents outside herdr's built-in list (e.g.
   freebuff) can be classified via herdr's custom-agent API -
   `herdr pane report-agent <pane> --source custom:<name> --agent <kind>
-  --state working|idle|blocked` -after which they render as a normal
+  --state working|idle|blocked` - after which they render as a normal
   column, including pid/mem resolution and their `AGENT_BADGE` badge.
   Un-classified tabs that merely run non-agent processes stay
   `(? unknown)` by design.
-- **pid + mem** -resolved per agent from `/proc` (herdr's snapshot carries
+- **pid + mem** - resolved per agent from `/proc` (herdr's snapshot carries
   no pid): matched by agent-kind alias + cwd, external cards by their pts
   tty.
-- **Text + trail** -what the agent posted: current line plus its last
+- **Text + trail** - what the agent posted: current line plus its last
   steps with timestamps.
 - **Removal**: herdr pane closed → column vanishes automatically (the
   snapshot is the liveness truth; stale card files are swept). Agents
@@ -114,7 +124,7 @@ the TUI: `agent_board.py --once`.
 
 For the interactive board (`agent_board view` / `agent_board view-compact`),
 clicking a column focuses its herdr tab (`herdr tab focus`); every line
-is numbered -type the number, Enter jumps to that tab (Esc cancels).
+is numbered - type the number, Enter jumps to that tab (Esc cancels).
 q quits, j/k scroll.
 
 ### Tests
@@ -151,11 +161,11 @@ attention.
 
 ### Features
 
-- **herdr source** -polls `herdr api snapshot`; notifies when a background
+- **herdr source** - polls `herdr api snapshot`; notifies when a background
   (non-focused) agent pane transitions to a needs-attention state:
   `blocked` (approval/question UI), `done` (background work finished), or
   `idle` while unfocused (ready for input).
-- **external source** -finds known coding-agent processes running *outside*
+- **external source** - finds known coding-agent processes running *outside*
   herdr (controlling tty not owned by a herdr pane) and notifies when one
   appears and its terminal goes idle. Best-effort heuristic.
 - Skips the pane you are already looking at; dedupes per episode.
@@ -206,7 +216,7 @@ suite; single modules can be skipped via `SKIP_<MODULE>=1`.
 Versioning: `Major.Minor.YYYYMMDDhhmmssZ` (UTC timestamp stamp). The stamp
 lives in `src/agent_board/board.py __version__`; `pyproject.toml [project]
 version` carries the same stamp without the trailing `Z` (PEP 440 does not
-allow the Z) -kept in sync by `./_check_version`. Every helper script
+allow the Z) - kept in sync by `./_check_version`. Every helper script
 carries its own stamp. Project
 history is kept in `history.md` (newest entry on top, doubles as release
 notes) with working archives under `history/`; the rules are documented in
@@ -234,21 +244,21 @@ symlinks into this directory.
 
 ## Platforms
 
-Linux is the supported platform -the systemd service install and the
+Linux is the supported platform - the systemd service install and the
 packaging classifiers assume it. macOS and Windows run partially:
 
-- **Linux** -fully supported. Needs Python 3.13+, `herdr` in PATH, and
+- **Linux** - fully supported. Needs Python 3.13+, `herdr` in PATH, and
   `pgrep` (procps); `notify-send` for agent-watch desktop notifications.
-- **macOS** -partial. The `note` CLI, the curses TUI, and the JSON card
+- **macOS** - partial. The `note` CLI, the curses TUI, and the JSON card
   files work, but there is no `/proc`, so pid/mem resolution and
   external-tty discovery find nothing (columns render without pid, and
   agent-watch's external source stays silent). There is no systemd:
   run `agent_board.py serve` directly (nohup/launchd) instead of the
   user units.
-- **Windows** -not supported natively: `curses` is not part of Windows
+- **Windows** - not supported natively: `curses` is not part of Windows
   CPython, and `/proc`, `pgrep`, `notify-send`, systemd, and `herdr` are
   POSIX-only. Run the tools inside **WSL2** with systemd enabled
-  (`/etc/wsl.conf` `[boot] systemd=true`) -there they behave like on
+  (`/etc/wsl.conf` `[boot] systemd=true`) - there they behave like on
   Linux, including the service install below.
 
 ## Install (fresh machine)
@@ -281,12 +291,12 @@ agent-watch). Dev checks additionally need `ruff`, `mypy`, `pytest` -
 ### man + tldr pages (optional, Linux)
 
 ```sh
-# man pages -the watcher page installs under its .SH NAME (agent-watch):
+# man pages - the watcher page installs under its .SH NAME (agent-watch):
 install -D man/agent_board.1   ~/.local/share/man/man1/agent_board.1
 install -D man/agent-watcher.1 ~/.local/share/man/man1/agent-watch.1
 mandb
 
-# tldr pages -copy into your tldr client's custom page dir
+# tldr pages - copy into your tldr client's custom page dir
 # (tldr-python-client example below; tealdeer uses ~/.local/share/tealdeer/pages):
 mkdir -p ~/.local/share/tldr/pages/custom
 cp tldr/agent_board.md    ~/.local/share/tldr/pages/custom/agent_board.md

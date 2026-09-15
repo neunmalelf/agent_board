@@ -6,6 +6,13 @@
 > alternatives. Rules: see `.agentrules` (History Rule) and
 > `docs/development.md`.
 
+## 2.4.20260915185529Z - 2026-09-15
+
+README: "Live board" section reworked with the run commands
+(`agent_board view` / `agent_board view-compact`) next to their
+screenshots. Stray `.README.md.kate-swp` and `problem layout view.png`
+removed; hyphen spacing artifacts from the em-dash sweep fixed.
+
 ## 2.4.20260915185022Z - 2026-09-15
 
 `requirements-dev.txt` deleted: it duplicated
