@@ -6,6 +6,12 @@
 > alternatives. Rules: see `.agentrules` (History Rule) and
 > `docs/development.md`.
 
+## 2.4.20260915174736Z - 2026-09-15
+
+Repository published: created the public GitHub repo
+`neunmalelf/agent_board` and pushed master; `pyproject.toml [project.urls]`
+now carries Repository and Issues links per the agent rules.
+
 ## 2.4.20260915182613Z - 2026-09-15
 
 README intro: states up front that agent_board works on top of Herdr

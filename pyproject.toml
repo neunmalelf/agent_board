@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "agent-board"
 # PEP 440 forbids the trailing "Z" of the workspace stamp convention, so the
 # packaging version carries the bare timestamp; module __version__ keeps the Z.
-version = "2.4.20260915182613"
+version = "2.4.20260915174736"
 description = "agent_board - live status board for coding agents, plus the agent-watch notification daemon"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -25,6 +25,10 @@ classifiers = [
 # agent_board is stdlib-only by design (curses TUI, /proc scanning, JSON
 # card files); zero third-party runtime dependencies.
 dependencies = []
+
+[project.urls]
+Repository = "https://github.com/neunmalelf/agent_board"
+Issues = "https://github.com/neunmalelf/agent_board/issues"
 
 [project.optional-dependencies]
 dev = [
