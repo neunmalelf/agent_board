@@ -35,7 +35,7 @@ import sys
 import time
 from datetime import datetime
 
-__version__ = "2.4.20260915152649Z"
+__version__ = "2.4.20260915172753Z"
 
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
@@ -61,10 +61,11 @@ SPINNER_RE = re.compile(r"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]")
 
 
 def clean_title(text: str) -> str:
-    """Tab title without transient spinner glyphs (agents animate one while busy).
+    """Tab title without transient spinner glyphs or the freebuff brand label.
 
     usage: clean_title <TEXT>
-    returns: The cleaned title, or "" when text is empty.
+    returns: The cleaned title, or "" when text is empty. A leading
+        "Freebuff:" label is dropped because the board prepends the FB badge.
 
     Args:
         text (str): Raw tab title, possibly with transient spinner glyphs.
@@ -72,7 +73,8 @@ def clean_title(text: str) -> str:
     Example:
         clean_title("π Refactoring auth ⠹")
     """
-    return re.sub(r"\s{2,}", " ", SPINNER_RE.sub(" ", text or "")).strip()
+    stripped = re.sub(r"\s{2,}", " ", SPINNER_RE.sub(" ", text or "")).strip()
+    return re.sub(r"^Freebuff:\s*", "", stripped, flags=re.IGNORECASE)
 
 
 # --------------------------------------------------------------------------
@@ -715,6 +717,7 @@ AGENT_BADGE = {
     "omp": ("π", ("π",)),
     "opencode": ("OC", ("OpenCode", "OC")),
     "agy": ("AG", ()),
+    "freebuff": ("FB", ()),
 }
 
 

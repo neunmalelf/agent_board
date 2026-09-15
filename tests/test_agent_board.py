@@ -107,6 +107,8 @@ def test_clean_title_strips_spinner_and_collapses_space():
     assert mod.clean_title("π \u280b Use parentheses in view modes") == \
         "π Use parentheses in view modes"
     assert mod.clean_title("a   b") == "a b"
+    assert mod.clean_title("Freebuff: continue") == "continue"
+    assert mod.clean_title("freebuff:12s") == "12s"
     assert mod.clean_title(None) == ""
     assert mod.clean_title("") == ""
 
@@ -640,6 +642,10 @@ def test_head_parts_badge_extraction_and_prepend():
     parts = mod.head_parts(agy)
     assert parts[-2][1] == "badge" and parts[-2][0].endswith("AG")
     assert parts[-1][1] == "desc"
+    fb = col(agent="freebuff", header="continue", tab_name="")
+    parts = mod.head_parts(fb)
+    assert parts[-2][1] == "badge" and parts[-2][0].endswith("FB")
+    assert parts[-1] == (" continue", "desc")
 
     unknown = col(agent="weird", header="whatever", tab_name="")
     assert [k for _, k in mod.head_parts(unknown)] == [None, "desc"]

@@ -6,7 +6,7 @@
 > alternatives. Rules: see `.agentrules` (History Rule) and
 > `docs/development.md`.
 
-## 2.4.20260915152649Z - 2026-09-15
+## 2.4.20260915172753Z - 2026-09-15
 
 Documentation: platform coverage, man/tldr install steps, stale paths:
 
@@ -29,6 +29,12 @@ Documentation: platform coverage, man/tldr install steps, stale paths:
 - **view-compact spacing**: the left column's agent rows now draw one
   space in, so the menu number no longer sits flush at column 0
   (`run_tui` compact path only; full frame blocks unchanged).
+- **freebuff badge**: `AGENT_BADGE` gains `"freebuff": ("FB", ())` and
+  `clean_title` drops a leading "Freebuff:" brand label, so herdr
+  custom-reported freebuff agents render like every other agent
+  (`(bento) FB continue`). Verified live: herdr
+  `pane report-agent --agent freebuff` makes the board classify the tab;
+  the freebuff agent itself posts via the installed agent-board skill.
 
 ## 2.3.20260913092333Z - 2026-09-13
 
