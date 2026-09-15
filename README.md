@@ -2,6 +2,15 @@
 
 Watch what your coding agents are doing — in one place, live.
 
+agent_board is a tool on top of [Herdr](https://herdr.dev) — the terminal
+workspace manager for coding agents. The board reads its liveness and
+status chips from herdr's session snapshot, and `agent-watch` watches the
+same source; herdr must be installed and in PATH.
+
+It is a POSIX tool: Linux is fully supported, macOS works with reduced
+process discovery, and Windows is only usable inside WSL2 — see
+[Platforms](#platforms).
+
 Two small tools live in this project (both Python 3, stdlib only):
 
 | Tool | What it does |

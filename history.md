@@ -6,6 +6,12 @@
 > alternatives. Rules: see `.agentrules` (History Rule) and
 > `docs/development.md`.
 
+## 2.4.20260915182613Z - 2026-09-15
+
+README intro: states up front that agent_board works on top of Herdr
+(linked to https://herdr.dev) and is a POSIX tool — Linux fully
+supported, macOS with reduced process discovery, Windows via WSL2.
+
 ## 2.4.20260915173031Z - 2026-09-15
 
 Release documentation:
