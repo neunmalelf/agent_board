@@ -6,7 +6,7 @@
 > alternatives. Rules: see `.agentrules` (History Rule) and
 > `docs/development.md`.
 
-## 2.4.20260915151853Z - 2026-09-15
+## 2.4.20260915152649Z - 2026-09-15
 
 Documentation: platform coverage, man/tldr install steps, stale paths:
 
@@ -26,6 +26,9 @@ Documentation: platform coverage, man/tldr install steps, stale paths:
   `agent-watcher-readme.md`; corrected to `agent_board` paths
   (`agent_watch.py` shim, `src/agent_board/watch.py`, repo README/man).
 - agent-watch version 1.2 → 1.3 with the release stamp.
+- **view-compact spacing**: the left column's agent rows now draw one
+  space in, so the menu number no longer sits flush at column 0
+  (`run_tui` compact path only; full frame blocks unchanged).
 
 ## 2.3.20260913092333Z - 2026-09-13
 

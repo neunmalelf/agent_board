@@ -23,7 +23,7 @@ import subprocess
 import sys
 import time
 
-__version__ = "1.3.20260915151853Z"
+__version__ = "1.3.20260915152649Z"
 # Agent binaries herdr recognizes; used to spot external (non-herdr) agents.
 KNOWN_AGENTS = {
     "omp", "codex", "claude", "gemini", "opencode", "agy", "hermes",

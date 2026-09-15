@@ -35,7 +35,7 @@ import sys
 import time
 from datetime import datetime
 
-__version__ = "2.4.20260915151853Z"
+__version__ = "2.4.20260915152649Z"
 
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
@@ -1077,7 +1077,7 @@ def run_tui(stdscr, herdr_bin: str, poll_period: float, stale_after: float,
                     left = cols[i]
                     chip = curses.color_pair(
                         CHIP_COLOR.get(left["chip"], 0)) | curses.A_BOLD
-                    draw_parts(stdscr, y, 0,
+                    draw_parts(stdscr, y, 1,
                                [(f"{i + 1} ", "grey")] + compact_parts(left),
                                chip, min(half, w - 1))
                 if right is not None and 1 <= y < h - 1:
