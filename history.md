@@ -6,6 +6,17 @@
 > alternatives. Rules: see `.agentrules` (History Rule) and
 > `docs/development.md`.
 
+## 2.4.20260915184045Z - 2026-09-15
+
+Bug fix — fullscreen TUI (normal view): the column head rendered one
+segment per line (number, `┌─`, chip, tab label, badge, header stacked
+vertically). `column_lines` now emits the whole rule head as a single row
+of (text, kind) segments; `run_tui` draws rows via `draw_parts()`, keeping
+per-segment colors (badge/tab/grey/desc). `accent_attr` gains the
+"meta"/"text"/"trail" kinds for the meta/status/trail lines. Two new
+tests (single-row head, width truncation); 51 pass. Verified live in
+tmux at 72 cols.
+
 ## 2.4.20260915174736Z - 2026-09-15
 
 Repository published: created the public GitHub repo

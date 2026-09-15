@@ -651,6 +651,37 @@ def test_head_parts_badge_extraction_and_prepend():
     assert [k for _, k in mod.head_parts(unknown)] == [None, "desc"]
 
 
+def test_column_lines_header_on_one_row():
+    """column_lines renders the whole rule head on a single row.
+
+    usage: test_column_lines_header_on_one_row
+    returns: None.
+
+    Example:
+        test_column_lines_header_on_one_row()
+    """
+    block = mod.column_lines(col(chip="idle", text="a", age=1,
+                                 log=[{"t": 1000.0, "k": "step", "m": "todo"}]),
+                             80, num=4)
+    assert "".join(t for t, _ in block[0]) == "4 ┌─ (○ idle) (tab) π Title"
+    assert len(block) == 5  # head, meta, text, trail, └
+    assert block[1] == [("│ omp · w1:t1 · updated 1s", "meta")]
+    assert block[3][0][1] == "trail" and block[3][0][0].endswith("step: todo")
+
+
+def test_column_lines_truncates_head_to_width():
+    """column_lines clips head segments at the given width.
+
+    usage: test_column_lines_truncates_head_to_width
+    returns: None.
+
+    Example:
+        test_column_lines_truncates_head_to_width()
+    """
+    block = mod.column_lines(col(chip="idle"), 10, num=4)
+    assert "".join(t for t, _ in block[0]) == "4 ┌─ (○ id"
+
+
 def test_compact_line_segments_and_width():
     """compact_line joins column segments and truncates to the given width.
 

@@ -35,7 +35,7 @@ import sys
 import time
 from datetime import datetime
 
-__version__ = "2.4.20260915174736Z"
+__version__ = "2.4.20260915184045Z"
 
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
@@ -898,7 +898,8 @@ def accent_attr(kind: str | None, chip: int) -> int:
     returns: A curses attribute int usable with addnstr().
 
     Args:
-        kind (str, optional): Segment kind ("badge", "tab", "grey", "desc") or None.
+        kind (str, optional): Segment kind ("badge", "tab", "grey", "desc",
+            "meta", "text", "trail") or None.
         chip (int): Fallback curses attribute used when kind is None.
 
     Example:
@@ -912,6 +913,12 @@ def accent_attr(kind: str | None, chip: int) -> int:
         return curses.color_pair(6)
     if kind == "desc":
         return curses.color_pair(6) | curses.A_BOLD
+    if kind == "meta":
+        return curses.A_DIM
+    if kind == "text":
+        return curses.A_BOLD
+    if kind == "trail":
+        return curses.A_NORMAL
     return chip
 
 
@@ -942,38 +949,41 @@ def draw_parts(stdscr, y: int, x: int, parts: list[tuple[str, str | None]],
     return x
 
 
-def column_lines(col: dict, width: int, num: int = 0) -> list[tuple[str, int]]:
-    """Pre-render one column as (text, attr) lines for the fullscreen TUI.
+def column_lines(col: dict, width: int, num: int = 0) -> list[list[tuple[str, str | None]]]:
+    """Pre-render one column as rows of (text, kind) segments for the TUI.
 
     usage: column_lines <COL> <WIDTH> [NUM]
-    returns: Lines: rule head, meta line, optional status and trail, closing "└".
+    returns: Rows: rule head (number, "┌─", chip, tab, badge, header segments
+        on ONE row), meta line, optional status and trail lines, closing "└".
+        Kinds are draw_parts()/accent_attr() keys; the consumer supplies the
+        chip color.
 
     Args:
-        col (dict): Column dict from build_columns().
-        width (int): Maximum rule width in columns.
+        col (dict): Column dict to render.
+        width (int): Rightmost column; head segments are truncated there.
         num (int, optional): 1-based column number shown in the rule. Defaults to 0.
 
     Example:
         block = column_lines(cols[0], 80, num=1)
     """
-    chip = curses.color_pair(CHIP_COLOR.get(col["chip"], 0)) | curses.A_BOLD
-    lines = []
+    head: list[tuple[str, str | None]] = []
     x = 0
     segs = [(f"{num} ", "grey")] if num else []
     for text, kind in segs + [("┌─ ", None)] + head_parts(col):
         if x >= width:
             break
         n = min(len(text), width - x)
-        lines.append((text[:n], accent_attr(kind, chip)))
+        head.append((text[:n], kind))
         x += n
-    lines.append(("│ " + meta_str(col), curses.A_DIM))
+    rows: list[list[tuple[str, str | None]]] = [head]
+    rows.append([("│ " + meta_str(col), "meta")])
     if col["text"]:
-        lines.append(("│ ● " + col["text"], curses.A_BOLD))
+        rows.append([("│ ● " + col["text"], "text")])
     for e in col["log"][-4:]:
         ts = time.strftime("%H:%M", time.localtime(e["t"]))
-        lines.append((f"│   · [{ts}] {e['k']}: {e['m']}", curses.A_NORMAL))
-    lines.append(("└", curses.A_DIM))
-    return lines
+        rows.append([(f"│   · [{ts}] {e['k']}: {e['m']}", "trail")])
+    rows.append([("└", "meta")])
+    return rows
 
 
 def column_at_click(row_map: dict, my: int, mx: int, compact: bool, half: int) -> int | None:
@@ -1096,9 +1106,11 @@ def run_tui(stdscr, herdr_bin: str, poll_period: float, stale_after: float,
         else:
             y = 2 - offset
             for bi, block in enumerate(blocks):
-                for text, attr in block:
+                chip = curses.color_pair(
+                    CHIP_COLOR.get(cols[bi]["chip"], 0)) | curses.A_BOLD
+                for row in block:
                     if 1 <= y < h - 1:
-                        stdscr.addnstr(y, 0, text, w - 1, attr)
+                        draw_parts(stdscr, y, 0, row, chip, w - 1)
                         row_map[y] = bi
                     y += 1
                 y += 1
