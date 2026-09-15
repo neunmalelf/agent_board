@@ -6,6 +6,27 @@
 > alternatives. Rules: see `.agentrules` (History Rule) and
 > `docs/development.md`.
 
+## 2.4.20260915151853Z - 2026-09-15
+
+Documentation: platform coverage, man/tldr install steps, stale paths:
+
+- **README "Platforms"** section: Linux (fully supported), macOS
+  (partial: no `/proc` so pid/mem + external-tty discovery are blind, no
+  systemd so the user units don't apply — note/TUI/cards work), Windows
+  (not supported natively: no `curses` in Windows CPython, no `/proc`,
+  POSIX-only helpers; run inside WSL2 with systemd enabled).
+- **README "man + tldr pages"** install block: install
+  `man/agent_board.1` + `man/agent-watcher.1` into
+  `~/.local/share/man/man1/` (watcher page under its .SH NAME,
+  `agent-watch.1`) and both `tldr/` pages into the client's custom page
+  dir. The directories existed but no install instructions did.
+- **Stale paths fixed**: `tldr/agent-watcher.md` and
+  `man/agent-watcher.1` still pointed at the pre-restructure
+  `~/projects/agent-watcher/` tree and a nonexistent
+  `agent-watcher-readme.md`; corrected to `agent_board` paths
+  (`agent_watch.py` shim, `src/agent_board/watch.py`, repo README/man).
+- agent-watch version 1.2 → 1.3 with the release stamp.
+
 ## 2.3.20260913092333Z - 2026-09-13
 
 Proper Python project packaging: src/ layout, tooling gates, helper scripts, hooks, docs:

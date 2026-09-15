@@ -210,6 +210,25 @@ coding agents.
 `~/sbin/agent_board.py`, `~/sbin/agent_watch` and `~/sbin/agent_board` are
 symlinks into this directory.
 
+## Platforms
+
+Linux is the supported platform — the systemd service install and the
+packaging classifiers assume it. macOS and Windows run partially:
+
+- **Linux** — fully supported. Needs Python 3.13+, `herdr` in PATH, and
+  `pgrep` (procps); `notify-send` for agent-watch desktop notifications.
+- **macOS** — partial. The `note` CLI, the curses TUI, and the JSON card
+  files work, but there is no `/proc`, so pid/mem resolution and
+  external-tty discovery find nothing (columns render without pid, and
+  agent-watch's external source stays silent). There is no systemd:
+  run `agent_board.py serve` directly (nohup/launchd) instead of the
+  user units.
+- **Windows** — not supported natively: `curses` is not part of Windows
+  CPython, and `/proc`, `pgrep`, `notify-send`, systemd, and `herdr` are
+  POSIX-only. Run the tools inside **WSL2** with systemd enabled
+  (`/etc/wsl.conf` `[boot] systemd=true`) — there they behave like on
+  Linux, including the service install below.
+
 ## Install (fresh machine)
 
 ```sh
@@ -236,6 +255,23 @@ cp -r ~/projects/agent_board/skills/agent-board ~/.agents/skills/
 Requirements: Python 3.13+, `herdr` in PATH, `notify-send` (for
 agent-watch). Dev checks additionally need `ruff`, `mypy`, `pytest`
 (`python3 -m pip install -r requirements-dev.txt`).
+
+### man + tldr pages (optional, Linux)
+
+```sh
+# man pages — the watcher page installs under its .SH NAME (agent-watch):
+install -D man/agent_board.1   ~/.local/share/man/man1/agent_board.1
+install -D man/agent-watcher.1 ~/.local/share/man/man1/agent-watch.1
+mandb
+
+# tldr pages — copy into your tldr client's custom page dir
+# (tldr-python-client example below; tealdeer uses ~/.local/share/tealdeer/pages):
+mkdir -p ~/.local/share/tldr/pages/custom
+cp tldr/agent_board.md    ~/.local/share/tldr/pages/custom/agent_board.md
+cp tldr/agent-watcher.md  ~/.local/share/tldr/pages/custom/agent-watcher.md
+```
+Afterwards `man agent-board`, `man agent-watch`, and
+`tldr agent_board` / `tldr agent-watcher` resolve locally.
 
 ## Managing the services
 

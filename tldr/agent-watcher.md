@@ -8,9 +8,9 @@ Notify which agent tab needs input.
 ## Install
 
 ```sh
-ln -s ~/projects/agent-watcher/agent-watch ~/sbin/agent-watch
+ln -s ~/projects/agent_board/agent_watch.py ~/sbin/agent_watch
 mkdir -p ~/.config/systemd/user
-cp ~/projects/agent-watcher/systemd/agent-watch.service ~/.config/systemd/user/
+cp ~/projects/agent_board/systemd/agent-watch.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now agent-watch.service
 ```
@@ -44,7 +44,7 @@ journalctl --user -u agent-watch -f
 
 ## Files
 
-- Source: `~/projects/agent-watcher/agent-watch`
+- Source: `~/projects/agent_board/src/agent_board/watch.py`
 - Unit: `~/.config/systemd/user/agent-watch.service`
-- README: `~/projects/agent-watcher/agent-watcher-readme.md`
-- Man: `~/projects/agent-watcher/agent-watcher.1`
+- README: `~/projects/agent_board/README.md`
+- Man: `~/projects/agent_board/man/agent-watcher.1`
