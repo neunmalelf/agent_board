@@ -11,7 +11,7 @@ handling, docstring style, LF line endings).
 ## Checks
 
 ```sh
-./_tests        # pytest + ruff + mypy — must pass before every commit
+./_tests        # pytest + ruff + mypy - must pass before every commit
 ./_check_version
 ```
 

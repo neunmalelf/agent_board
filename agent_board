@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# agent_board — manage the agent_board service: start/stop/restart/status/view
+# agent_board - manage the agent_board service: start/stop/restart/status/view
 #
 #   agent_board start     # install + enable + start the systemd user service
 #   agent_board stop      # stop + disable the service
@@ -66,7 +66,7 @@ case "${1:-status}" in
         exec "$HOME/sbin/agent_board.py" --autorefresh "$period"
         ;;
     help|-h|--help)
-        echo "agent_board — manage the agent_board service"
+        echo "agent_board - manage the agent_board service"
         echo ""
         echo "  start         install (if needed) + enable + start the systemd user service"
         echo "  stop          stop + disable the service"

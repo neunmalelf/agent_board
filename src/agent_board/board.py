@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""agent-board — a live status board for coding agents.
+"""agent-board - a live status board for coding agents.
 
 Agents running under herdr (or in any shell) register themselves and post a
 one-line status of what they are doing, updating it until the task is closed:
@@ -35,7 +35,7 @@ import sys
 import time
 from datetime import datetime
 
-__version__ = "2.4.20260915184630Z"
+__version__ = "2.4.20260915184915Z"
 
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
@@ -1116,7 +1116,7 @@ def run_tui(stdscr, herdr_bin: str, poll_period: float, stale_after: float,
                 y += 1
         foot = " q quit · ↑/↓ or j/k scroll · click column = focus tab "
         if focus_buf:
-            foot = f" focus #{focus_buf} — Enter jumps, Esc cancels ·"
+            foot = f" focus #{focus_buf} - Enter jumps, Esc cancels ·"
         stdscr.addnstr(h - 1, 0, foot, w - 1, curses.A_DIM)
         stdscr.refresh()
 
@@ -1388,7 +1388,7 @@ def main(argv: list[str] | None = None) -> int:
     note.add_argument("--pane", metavar="PANE",
                       help="override pane id (default $HERDR_PANE_ID / tty)")
     note.add_argument("--reset", metavar="WHEN",
-                      help="for 'quota': when the limit resets — ISO time, "
+                      help="for 'quota': when the limit resets - ISO time, "
                            "duration (2d 4h 30m / 90m), or seconds")
     note.add_argument("--tab", metavar="TAB", help="override tab id")
     note.add_argument("--header", metavar="HEADER",

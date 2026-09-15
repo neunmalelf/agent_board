@@ -1,4 +1,4 @@
-<!-- __version__: 1.0.20260913092333Z -->
+<!-- __version__: 1.1.20260915185433Z -->
 
 # Agent Rules for agent_board
 
@@ -12,7 +12,7 @@ frames) uses the standard library only. Third-party tools are allowed as
 ## src/ Layout Rule
 All implementation lives in `src/agent_board/` (`board.py`, `watch.py`).
 The root-level `agent_board.py` and `agent_watch.py` are launcher shims
-only: sys.path bootstrap plus a `main()` call — never add features there.
+only: sys.path bootstrap plus a `main()` call - never add features there.
 The root file `agent_board` (no extension) is the bash service manager;
 shell logic goes there, not into the Python package. (The wrapper file
 blocks a root-level package directory, which is why the package lives
@@ -23,7 +23,7 @@ under `src/`.)
 `[build-system]` (setuptools), full `[project]` metadata, `[project.scripts]`
 for every CLI entry, `[tool.ruff]`, `[tool.mypy]`, and
 `[tool.pytest.ini_options]`. `[project.urls]` is added when the repository
-gets a public remote — do not invent placeholder URLs. No legacy
+gets a public remote - do not invent placeholder URLs. No legacy
 `setup.py`-only packaging.
 
 ## Version Stamp Rule
@@ -55,7 +55,7 @@ deliberately (`SKIP_TESTS=1`) and never silently.
    entry per version bump, written before the release commit; the latest
    entry doubles as the release notes.
 2. `history/` is the working archive: `prompts/`, `changes/`, `todo/`,
-   `plans/`, `tests/`, `ideas/`, `goals/` — archive with a unified
+   `plans/`, `tests/`, `ideas/`, `goals/` - archive with a unified
    `YYYYMMDDThhmmss` timestamp in the filename; never delete archived files.
 3. Decisions get their own dated entry in `history.md`, including reasoning
    and rejected alternatives (see the 2026-09-13 textual decision).
@@ -69,3 +69,9 @@ functions.
 ## Line Endings
 LF everywhere; `.gitattributes` enforces `* text=auto eol=lf`. Never write
 CRLF files into this repository.
+
+## Dash Rule
+Never use the em dash character (U+2014) in any text: markdown files,
+docstrings, help texts, UI strings, commit messages, chat replies. Use a
+plain hyphen `-` instead. Box-drawing characters (U+2500 table rules in
+the board frames and comments) are not dashes and stay untouched.

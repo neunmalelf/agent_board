@@ -1,4 +1,4 @@
-"""agent_board — a live status board for coding agents.
+"""agent_board - a live status board for coding agents.
 
 The package pairs the board itself (`agent_board.board`: the `note` CLI,
 the fullscreen curses TUI, the ANSI frame renderer, and the headless

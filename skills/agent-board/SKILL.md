@@ -1,6 +1,6 @@
 ---
 name: agent-board
-description: "Post your live status to the shared agent board (agent_board.py) while you work. Use at the start of any multi-step task — especially when a goal.md or todo.md exists or other agents are running in parallel: register, post each step as you start it, update as you go, mark done at the end, stop when leaving without finishing."
+description: "Post your live status to the shared agent board (agent_board.py) while you work. Use at the start of any multi-step task - especially when a goal.md or todo.md exists or other agents are running in parallel: register, post each step as you start it, update as you go, mark done at the end, stop when leaving without finishing."
 ---
 
 # Agent board
@@ -28,7 +28,7 @@ Run exactly one of (binary is `~/sbin/agent_board.py`, normally just
 
 - One short line per message (<120 chars), concrete: file, symbol, action.
 - `step` and `input` also append to your visible trail; `update` replaces
-  the current line only. A handful per task is right — do not spam.
+  the current line only. A handful per task is right - do not spam.
 - Whenever you ask the user something or present options, post `input`:
   your column turns yellow ("needs input") so the user sees it. Your next
   `step`/`update`/`done` clears it automatically.

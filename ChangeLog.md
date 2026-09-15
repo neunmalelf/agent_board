@@ -7,7 +7,7 @@ release notes live in `history.md`; user-facing highlights in `NEWS.md`.
 
 ## 2.4.20260915172753Z - 2026-09-15
 
-- README: "Platforms" section (Linux supported; macOS partial — no
+- README: "Platforms" section (Linux supported; macOS partial - no
   `/proc`, no systemd; Windows via WSL2) and "man + tldr pages" install
   block.
 - README: note on custom-reported agents (freebuff) in the Columns
@@ -39,7 +39,7 @@ release notes live in `history.md`; user-facing highlights in `NEWS.md`.
   `LICENSE`, `requirements-dev.txt`, `.gitattributes` (LF).
 - Fixes: `agent_board` wrapper installed a wrong unit filename;
   agent-watch version bumped 1.1 → 1.2.
-- Decision recorded: no textual — the TUI stays curses (stdlib-only
+- Decision recorded: no textual - the TUI stays curses (stdlib-only
   invariant and the ASCII column frame outweigh the interaction gains).
 
 ## 2.2.202609130748Z - 2026-09-13

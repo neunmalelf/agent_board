@@ -1,10 +1,19 @@
-# agent_board — History
+# agent_board - History
 
 > Keep this file up to date before every release: add an entry for the new
 > version at the top. The latest entry doubles as the release notes.
 > Decisions get their own dated entry with reasoning and rejected
 > alternatives. Rules: see `.agentrules` (History Rule) and
 > `docs/development.md`.
+
+## 2.4.20260915184915Z - 2026-09-15
+
+Dash rule adopted: em dashes (U+2014) replaced with plain hyphens across
+all markdown docs, docstrings, help texts, and shell/Python strings
+(README, NEWS, ChangeLog, history, AGENTS.md, .agentrules, skills, docs/,
+src, launcher shims, the `agent_board` service manager). New "Dash Rule"
+section in `.agentrules` (1.0 -> 1.1 stamp); box-drawing characters are
+exempt.
 
 ## 2.4.20260915184630Z - 2026-09-15
 
@@ -14,7 +23,7 @@ alt text instead of bare file names.
 
 ## 2.4.20260915184045Z - 2026-09-15
 
-Bug fix — fullscreen TUI (normal view): the column head rendered one
+Bug fix - fullscreen TUI (normal view): the column head rendered one
 segment per line (number, `┌─`, chip, tab label, badge, header stacked
 vertically). `column_lines` now emits the whole rule head as a single row
 of (text, kind) segments; `run_tui` draws rows via `draw_parts()`, keeping
@@ -32,7 +41,7 @@ now carries Repository and Issues links per the agent rules.
 ## 2.4.20260915182613Z - 2026-09-15
 
 README intro: states up front that agent_board works on top of Herdr
-(linked to https://herdr.dev) and is a POSIX tool — Linux fully
+(linked to https://herdr.dev) and is a POSIX tool - Linux fully
 supported, macOS with reduced process discovery, Windows via WSL2.
 
 ## 2.4.20260915173031Z - 2026-09-15
@@ -52,7 +61,7 @@ Documentation: platform coverage, man/tldr install steps, stale paths:
 
 - **README "Platforms"** section: Linux (fully supported), macOS
   (partial: no `/proc` so pid/mem + external-tty discovery are blind, no
-  systemd so the user units don't apply — note/TUI/cards work), Windows
+  systemd so the user units don't apply - note/TUI/cards work), Windows
   (not supported natively: no `curses` in Windows CPython, no `/proc`,
   POSIX-only helpers; run inside WSL2 with systemd enabled).
 - **README "man + tldr pages"** install block: install
@@ -91,7 +100,7 @@ Proper Python project packaging: src/ layout, tooling gates, helper scripts, hoo
   line-length 100), `[tool.mypy]`, `[tool.pytest.ini_options]`
   (pythonpath = src). Runtime stays stdlib-only (`dependencies = []`).
   Packaging version carries the stamp without the trailing Z (PEP 440
-  forbids the Z); module `__version__` keeps it — `_check_version`
+  forbids the Z); module `__version__` keeps it - `_check_version`
   enforces the pairing.
 - **Tooling gates green**: `ruff check src tests` and
   `mypy src/agent_board` pass; ~40 lint/type findings fixed along the way
@@ -129,7 +138,7 @@ Deciding factors:
   `pip install` step to the fresh-machine install, plus lazy-import hygiene so
   `note`/`serve`/`--once` would still run on machines without it.
 - **the ASCII column frame is the design**: the hand-drawn `┌─│└` columns would not
-  survive textual's Panel/border widgets literally — adopting it meant accepting a
+  survive textual's Panel/border widgets literally - adopting it meant accepting a
   visual redesign as part of the deal.
 - **no pain to fix**: the curses layer is ~270 lines, works, and has no reported
   friction. The textual gains (free scrolling/wrapping, widget-based click handling,
@@ -139,15 +148,15 @@ Findings from the assessment, quoted (2026-09-13 session):
 
 > Costs:
 >
-> 1. **Breaks "stdlib only"** — readme line 5 and the install requirements. The dep
+> 1. **Breaks "stdlib only"** - readme line 5 and the install requirements. The dep
 >    (textual + rich + a few transitive) is view-only, but it's real: fresh-machine
 >    install gains a `pip install` step.
-> 2. **Import hygiene required** — `curses` is currently top-level (:25). textual must
+> 2. **Import hygiene required** - `curses` is currently top-level (:25). textual must
 >    be lazily imported inside the view path, or `note`/`serve`/`--once` on a machine
 >    without the dep break. This is the one non-obvious design decision.
-> 3. **API churn** — textual majors fast; pin a version floor.
+> 3. **API churn** - textual majors fast; pin a version floor.
 > 4. **Startup ~0.5 s** vs instant curses. Negligible for a board you open and leave.
-> 5. **The ASCII frame (`┌─│└`) won't survive literally** — you'd get Panels/borders
+> 5. **The ASCII frame (`┌─│└`) won't survive literally** - you'd get Panels/borders
 >    that look better but different. A visual refresh is part of the deal, not
 >    optional.
 >
@@ -156,7 +165,7 @@ Findings from the assessment, quoted (2026-09-13 session):
 > Worth it, scoped exactly like the sketch: textual replaces only the fullscreen view;
 > `render_frame`/serve/`--once`/`note` stay stdlib. You lose ~270 lines of the most
 > hand-rolled, least-tested code in the file and gain real scrolling, wrapping, and
-> testable interaction — for one lazily-imported dep. If the ASCII column aesthetic
+> testable interaction - for one lazily-imported dep. If the ASCII column aesthetic
 > matters more to you than the interaction gains, the current curses layer is doing
 > its job fine and I'd leave it.
 

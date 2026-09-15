@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""agent-watch — turn "some agent beeped" into "which tab needs you".
+"""agent-watch - turn "some agent beeped" into "which tab needs you".
 
 Watches two sources and emits a desktop notification naming the exact
 workspace/tab/agent that needs attention:
 
-  1. herdr  — polls `herdr api snapshot`; notifies when a background
+  1. herdr  - polls `herdr api snapshot`; notifies when a background
               (non-focused) agent pane transitions to a needs-attention
               state (blocked, done, or idle while unfocused).
-  2. external — finds known coding-agent processes running OUTSIDE herdr
+  2. external - finds known coding-agent processes running OUTSIDE herdr
               (controlling tty not owned by a herdr pane) and notifies when
               one appears and its terminal goes idle (best-effort heuristic;
               no standalone instance was available to validate it).
@@ -23,7 +23,7 @@ import subprocess
 import sys
 import time
 
-__version__ = "1.3.20260915184630Z"
+__version__ = "1.3.20260915184915Z"
 # Agent binaries herdr recognizes; used to spot external (non-herdr) agents.
 KNOWN_AGENTS = {
     "omp", "codex", "claude", "gemini", "opencode", "agy", "hermes",

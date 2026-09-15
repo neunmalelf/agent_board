@@ -6,7 +6,7 @@ description: "python_comment_style: enforce a strict standardized docstring/func
 # SKILL: Standardized Python Docstring Enforcement
 
 ## TRIGGER
-Apply this skill AUTOMATICALLY whenever you are writing a new Python function, modifying an existing Python function, or refactoring Python code — in any Python source file or module you create or change.
+Apply this skill AUTOMATICALLY whenever you are writing a new Python function, modifying an existing Python function, or refactoring Python code - in any Python source file or module you create or change.
 
 ## APPLY / ENFORCE ON EXISTING FILES (user command)
 When the user says `apply python_comment_style <path>` or `enforce python_comment_style <path>`:
@@ -14,8 +14,8 @@ When the user says `apply python_comment_style <path>` or `enforce python_commen
 - Rewrite each function's docstring to the TEMPLATE below **without changing behavior**:
   - ensure the signature carries type hints; add missing hints only when they can be
     inferred with confidence, otherwise leave the signature and flag the function
-  - build the `usage:` line from the current signature (shape only — order,
-    required vs optional, arity — never types)
+  - build the `usage:` line from the current signature (shape only - order,
+    required vs optional, arity - never types)
   - add or repair `returns:`, conditional `errors:`, `Args:` and `Example:`
 - Preserve all code, comments and blank-line structure; only docstrings (and
   confidently inferred missing type hints) change.

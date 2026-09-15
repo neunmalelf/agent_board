@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""agent_watch.py — thin launcher shim for the agent-watch daemon.
+"""agent_watch.py - thin launcher shim for the agent-watch daemon.
 
 What/when: Keeps the historical entry path working after the move to the
 src/ package layout: `~/sbin/agent_watch` is a symlink to this file. The

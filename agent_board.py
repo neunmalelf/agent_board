@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""agent_board.py — thin launcher shim for the agent_board package.
+"""agent_board.py - thin launcher shim for the agent_board package.
 
 What/when: Keeps the historical entry paths working after the move to the
 src/ package layout: `~/sbin/agent_board.py` is a symlink to this file, and
