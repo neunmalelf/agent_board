@@ -8,7 +8,7 @@ Notify which agent tab needs input.
 ## Install
 
 ```sh
-ln -s ~/projects/agent_board/agent_watch.py ~/sbin/agent_watch
+ln -s ~/projects/agent_board/src/agent_board/watch.py ~/sbin/agent-watch
 mkdir -p ~/.config/systemd/user
 cp ~/projects/agent_board/systemd/agent-watch.service ~/.config/systemd/user/
 systemctl --user daemon-reload

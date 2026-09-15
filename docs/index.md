@@ -24,7 +24,6 @@ Full usage documentation lives in the repository [README.md](https://github.com/
 agent_board/
 ├── src/agent_board/       # the package: board.py (board) + watch.py (daemon)
 ├── agent_board.py          # launcher shim (systemd + ~/sbin symlink entry)
-├── agent_watch.py          # launcher shim (~/sbin/agent_watch entry)
 ├── agent_board             # bash service manager (start/stop/status/view)
 ├── _build _check_version _docs _git _install _menu _run _tests
 ├── hooks/                  # modular pre-commit hook + installer

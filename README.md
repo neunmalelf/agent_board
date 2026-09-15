@@ -35,8 +35,10 @@ Two small tools live in this project (both Python 3, stdlib only):
 | `agent-watch` | daemon that pops a desktop notification naming the exact tab that needs input |
 
 The implementation lives in the `src/agent_board/` package (`board.py`,
-`watch.py`); the root-level `agent_board.py` / `agent_watch.py` files are
-thin launcher shims kept for the `~/sbin` symlinks and the systemd units.
+`watch.py`); the root-level `agent_board.py` file is a thin launcher shim
+kept for the `~/sbin` symlink and the board systemd unit. `agent-watch`
+runs `src/agent_board/watch.py` directly via the `~/sbin/agent-watch`
+symlink (the old `agent_watch.py` shim is gone).
 
 ## agent_board.py
 
@@ -228,7 +230,6 @@ coding agents.
 ~/projects/agent_board/
 ├── src/agent_board/       # package: board.py (board) + watch.py (daemon)
 ├── agent_board.py          # launcher shim (systemd + ~/sbin entry)
-├── agent_watch.py          # launcher shim (~/sbin/agent-watch entry)
 ├── agent_board             # service manager (start/stop/status/view)
 ├── _build _check_version _docs _git _install _menu _run _tests
 ├── hooks/                  # modular pre-commit hook + installer
@@ -239,7 +240,7 @@ coding agents.
 └── AGENTS.md  .agentrules  LICENSE  pyproject.toml
 ```
 
-`~/sbin/agent_board.py`, `~/sbin/agent_watch` and `~/sbin/agent_board` are
+`~/sbin/agent_board.py`, `~/sbin/agent-watch` and `~/sbin/agent_board` are
 symlinks into this directory.
 
 ## Platforms
@@ -267,7 +268,7 @@ packaging classifiers assume it. macOS and Windows run partially:
 # 1. Put the project somewhere (here: ~/projects/agent_board)
 # 2. Symlink the binaries
 ln -s ~/projects/agent_board/agent_board.py ~/sbin/agent_board.py
-ln -s ~/projects/agent_board/agent_watch.py ~/sbin/agent_watch
+ln -s ~/projects/agent_board/src/agent_board/watch.py ~/sbin/agent-watch
 ln -s ~/projects/agent_board/agent_board ~/sbin/agent_board
 
 # 3. Install the services
@@ -320,7 +321,7 @@ systemctl --user restart agent-watch         # after editing the watcher
 ~/sbin/agent_board stop
 systemctl --user disable --now agent-watch.service
 rm ~/.config/systemd/user/agent_board.service ~/.config/systemd/user/agent-watch.service
-rm ~/sbin/agent_board.py ~/sbin/agent_watch ~/sbin/agent_board
+rm ~/sbin/agent_board.py ~/sbin/agent-watch ~/sbin/agent_board
 rm -rf ~/projects/agent_board
 ```
 

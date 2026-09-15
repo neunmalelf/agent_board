@@ -6,6 +6,19 @@
 > alternatives. Rules: see `.agentrules` (History Rule) and
 > `docs/development.md`.
 
+## 2.4.20260915185906Z - 2026-09-15
+
+`agent_watch.py` launcher shim removed. `~/sbin/agent-watch` now points
+directly at `src/agent_board/watch.py` (executable + shebang kept), so
+the systemd unit runs the module file itself; `agent_board.py` remains as
+the only launcher shim. References dropped from README (intro, layout,
+install, uninstall), `.agentrules` src-layout rule, `docs/index.md`,
+`tldr/agent-watcher.md`, the package docstring, and
+`man/agent_board.1` SEE ALSO (now `agent-watch (1)`). On this machine
+the missing hyphen-named `~/sbin/agent-watch` symlink was the real
+reason the unit had been crash-looping with 203/EXEC; created it and the
+service is active again.
+
 ## 2.4.20260915185529Z - 2026-09-15
 
 README: "Live board" section reworked with the run commands

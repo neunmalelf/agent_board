@@ -11,8 +11,10 @@ be imported at runtime.
 
 ## src/ Layout Rule
 All implementation lives in `src/agent_board/` (`board.py`, `watch.py`).
-The root-level `agent_board.py` and `agent_watch.py` are launcher shims
-only: sys.path bootstrap plus a `main()` call - never add features there.
+The root-level `agent_board.py` is a launcher shim only: sys.path
+bootstrap plus a `main()` call - never add features there. `agent-watch`
+runs `src/agent_board/watch.py` directly via the `~/sbin/agent-watch`
+symlink.
 The root file `agent_board` (no extension) is the bash service manager;
 shell logic goes there, not into the Python package. (The wrapper file
 blocks a root-level package directory, which is why the package lives
