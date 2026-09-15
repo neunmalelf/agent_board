@@ -1,6 +1,0 @@
-# Development requirements for agent_board (runtime is stdlib-only).
-# Install with:  python3 -m pip install -r requirements-dev.txt
-ruff
-mypy
-pytest
-pytest-cov

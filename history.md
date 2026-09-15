@@ -6,6 +6,13 @@
 > alternatives. Rules: see `.agentrules` (History Rule) and
 > `docs/development.md`.
 
+## 2.4.20260915185022Z - 2026-09-15
+
+`requirements-dev.txt` deleted: it duplicated
+`pyproject.toml [project.optional-dependencies].dev` exactly and nothing
+consumed it. README now points at `python3 -m pip install -e ".[dev]"`;
+`.agentrules` mentions only the pyproject extras.
+
 ## 2.4.20260915184915Z - 2026-09-15
 
 Dash rule adopted: em dashes (U+2014) replaced with plain hyphens across

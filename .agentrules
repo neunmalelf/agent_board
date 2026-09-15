@@ -6,8 +6,8 @@
 The runtime must stay zero-dependency: `pyproject.toml [project] dependencies = []`.
 Everything the board does (curses TUI, /proc scanning, JSON card files, ANSI
 frames) uses the standard library only. Third-party tools are allowed as
-*dev* dependencies (`[project.optional-dependencies].dev`,
-`requirements-dev.txt`) but must never be imported at runtime.
+*dev* dependencies (`[project.optional-dependencies].dev`) but must never
+be imported at runtime.
 
 ## src/ Layout Rule
 All implementation lives in `src/agent_board/` (`board.py`, `watch.py`).

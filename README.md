@@ -226,7 +226,7 @@ coding agents.
 ├── history/                # archives: prompts/ changes/ todo/ plans/ tests/ ideas/ goals/
 ├── docs/  mkdocs.yml       # MkDocs sources + config (built into site/)
 ├── man/  tldr/  systemd/  skills/  tests/
-└── AGENTS.md  .agentrules  LICENSE  pyproject.toml  requirements-dev.txt
+└── AGENTS.md  .agentrules  LICENSE  pyproject.toml
 ```
 
 `~/sbin/agent_board.py`, `~/sbin/agent_watch` and `~/sbin/agent_board` are
@@ -275,8 +275,8 @@ cp -r ~/projects/agent_board/skills/agent-board ~/.agents/skills/
 ```
 
 Requirements: Python 3.13+, `herdr` in PATH, `notify-send` (for
-agent-watch). Dev checks additionally need `ruff`, `mypy`, `pytest`
-(`python3 -m pip install -r requirements-dev.txt`).
+agent-watch). Dev checks additionally need `ruff`, `mypy`, `pytest` -
+`python3 -m pip install -e ".[dev]"`.
 
 ### man + tldr pages (optional, Linux)
 
