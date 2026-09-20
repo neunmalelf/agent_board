@@ -337,7 +337,103 @@ def test_herdr_agents_failures(monkeypatch: pytest.MonkeyPatch):
     assert mod.herdr_agents("herdr") == (None, [])
 
 
-def test_self_pane_id_prefers_env(monkeypatch: pytest.MonkeyPatch):
+def test_herdr_snapshot_parses_panes(monkeypatch: pytest.MonkeyPatch):
+    """herdr_snapshot unwraps agents, tabs, and panes from the snapshot JSON.
+
+    Args:
+        monkeypatch: pytest fixture patching mod.subprocess.run.
+    """
+    snap = {"agents": [{"pane_id": "p1"}], "tabs": [{"tab_id": "t1"}],
+            "panes": [{"pane_id": "p1", "tab_id": "t1"},
+                      {"pane_id": "p2", "tab_id": "t1"}]}
+    fake = mock.Mock(returncode=0,
+                     stdout=json.dumps({"result": {"snapshot": snap}}))
+    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: fake)
+    agents, tabs, panes = mod.herdr_snapshot("herdr")
+    assert agents == [{"pane_id": "p1"}]
+    assert tabs == [{"tab_id": "t1"}]
+    assert [p["pane_id"] for p in panes] == ["p1", "p2"]
+    assert mod.herdr_agents("herdr") == ([{"pane_id": "p1"}], [{"tab_id": "t1"}])
+
+
+def test_herdr_snapshot_unreachable_returns_no_panes(
+        monkeypatch: pytest.MonkeyPatch):
+    """herdr_snapshot reports (None, [], []) when herdr cannot be queried.
+
+    Args:
+        monkeypatch: pytest fixture patching mod.subprocess.run.
+    """
+    monkeypatch.setattr(mod.subprocess, "run",
+                        mock.Mock(side_effect=FileNotFoundError))
+    assert mod.herdr_snapshot("herdr") == (None, [], [])
+
+
+def test_herdr_match_pane_first_and_unambiguous_tab():
+    """herdr_match prefers the exact pane and refuses ambiguous tab lookups."""
+    agents = [{"pane_id": "w1:p1", "tab_id": "w1:t1"},
+              {"pane_id": "w1:p2", "tab_id": "w1:t1"},
+              {"pane_id": "w1:p3", "tab_id": "w1:t2"}]
+    assert mod.herdr_match(agents, "w1:p3", "w1:t1")["pane_id"] == "w1:p3"
+    assert mod.herdr_match(agents, "w1:p9", "w1:t1") is None   # stale pane id
+    assert mod.herdr_match(agents, "", "w1:t1") is None        # two in the tab
+    assert mod.herdr_match(agents, "", "w1:t2")["pane_id"] == "w1:p3"
+    assert mod.herdr_match(None, "x", "y") is None
+
+
+def test_pane_agent_picks_largest_known_process(monkeypatch: pytest.MonkeyPatch):
+    """pane_agent reports the largest known agent process running in a pane.
+
+    Args:
+        monkeypatch: pytest fixture patching the pane probe and /proc reader.
+    """
+    procs = [{"name": "bash", "pid": 1}, {"name": "cline", "pid": 2},
+             {"name": "node-MainThread", "pid": 3},
+             {"name": "freebuff", "pid": 4}]
+    monkeypatch.setattr(mod, "herdr_pane_processes", lambda b, p: procs)
+    monkeypatch.setattr(mod, "pid_rss", lambda pid: {2: 100, 4: 4096}.get(pid))
+    assert mod.pane_agent("herdr", "w1:p1") == ("freebuff", 4, 4096)
+    monkeypatch.setattr(mod, "pid_rss", lambda pid: None)
+    assert mod.pane_agent("herdr", "w1:p1") == ("cline", 2, None)  # first wins
+    monkeypatch.setattr(mod, "herdr_pane_processes",
+                        lambda b, p: [{"name": "nvtop", "pid": 9}])
+    assert mod.pane_agent("herdr", "w1:p1") == ("", None, None)
+
+
+def test_pid_rss_reads_proc_and_tolerates_garbage():
+    """pid_rss reads this process's RSS and returns None for junk ids."""
+    assert mod.pid_rss(os.getpid()) > 0
+    assert mod.pid_rss(None) is None and mod.pid_rss(0) is None
+
+
+def test_detect_pane_agents_skips_classified_panes(monkeypatch: pytest.MonkeyPatch):
+    """detect_pane_agents probes only the panes herdr did not classify.
+
+    Args:
+        monkeypatch: pytest fixture patching mod.pane_agent.
+    """
+    calls: list = []
+
+    def fake_pane_agent(herdr_bin: str, pane: str) -> tuple:
+        """Record the probed pane and report a cline process.
+
+        Args:
+            herdr_bin: Unused herdr binary name.
+            pane: Pane id being probed.
+
+        Returns:
+            A fixed (kind, pid, rss) triple.
+        """
+        calls.append(pane)
+        return ("cline", 7, 128)
+
+    monkeypatch.setattr(mod, "pane_agent", fake_pane_agent)
+    panes = [{"pane_id": "p1"}, {"pane_id": "p2"}, {"pane_id": ""}]
+    found = mod.detect_pane_agents("herdr", panes, [{"pane_id": "p1"}])
+    assert calls == ["p2"]
+    assert found == {"p2": {"agent": "cline", "pid": 7, "rss": 128}}
+
+
+
     """self_pane_id prefers HERDR_PANE_ID and falls back to an external tty id.
 
     usage: test_self_pane_id_prefers_env <MONKEYPATCH>
@@ -618,6 +714,113 @@ def test_build_columns_sort_order():
         ["working", "input", "stopped", "blocked", "idle", "done"]
 
 
+def test_build_columns_shows_second_agent_in_same_tab():
+    """build_columns renders every agent pane of a tab, not only herdr's pick."""
+    agents = [{"pane_id": "p1", "tab_id": "t1", "agent": "omp",
+               "agent_status": "working", "cwd": "/x"}]
+    panes = [{"pane_id": "p1", "tab_id": "t1", "cwd": "/x"},
+             {"pane_id": "p2", "tab_id": "t1", "cwd": "/y",
+              "terminal_title_stripped": "> fix the build"}]
+    cards = {"p2": {"pane_id": "p2", "tab_id": "t1", "header": "earth",
+                    "agent": "cline", "status": "editing board.py",
+                    "updated": 990.0}}
+    tabs = [{"tab_id": "t1", "label": "earth"}]
+    cols = mod.build_columns(agents, cards, 1000.0, 600, tabs=tabs, panes=panes)
+    by_pane = {c["pane"]: c for c in cols}
+    assert set(by_pane) == {"p1", "p2"}
+    assert by_pane["p2"]["agent"] == "cline"
+    assert by_pane["p2"]["header"] == "earth"
+    assert by_pane["p2"]["tab_name"] == "earth"
+    assert by_pane["p2"]["text"] == "editing board.py"
+    assert by_pane["p2"]["chip"] == "unknown"  # herdr has no state for it
+
+
+def test_build_columns_probes_pane_processes_and_keeps_tab_fallback():
+    """A probed pane agent yields a column; agent-less tabs still fall back."""
+    panes = [{"pane_id": "p1", "tab_id": "t1", "agent_status": "unknown",
+              "cwd": "/x", "terminal_title_stripped": "media ui"},
+             {"pane_id": "p2", "tab_id": "t2", "agent_status": "unknown",
+              "cwd": "/z", "terminal_title_stripped": "plain shell"}]
+    tabs = [{"tab_id": "t1", "label": "media"}, {"tab_id": "t2", "label": "quizza"}]
+    cols = mod.build_columns([], {}, 1000.0, 600, tabs=tabs, panes=panes,
+                             pane_agents={"p1": {"agent": "freebuff",
+                                                 "pid": 42, "rss": 2048}})
+    by_pane = {c["pane"]: c for c in cols}
+    assert by_pane["p1"]["agent"] == "freebuff"
+    assert by_pane["p1"]["pid"] == 42 and by_pane["p1"]["rss"] == 2048
+    assert by_pane["p1"]["header"] == "media ui"
+    assert by_pane["t2"]["header"] == "quizza"  # no agent: fallback column
+
+
+def test_build_columns_hides_herdr_cards_without_a_live_pane():
+    """A herdr card whose pane is gone renders no column at all."""
+    cards = {"p1": {"pane_id": "p1", "herdr": True, "status": "stale"}}
+    panes = [{"pane_id": "p2", "tab_id": "t1", "agent_status": "working",
+              "cwd": "/x"}]
+    assert mod.build_columns([], cards, 1000.0, 600, tabs=[], panes=panes) == []
+
+
+def test_sweep_drops_only_truly_dead_panes(state: Path):
+    """sweep keeps a card while its pane or tab is live and drops it otherwise.
+
+    Args:
+        state: Isolated state directory fixture.
+    """
+    mod.save_card({"pane_id": "p2", "herdr": True, "tab_id": "t1"})
+    tabs = [{"tab_id": "t1"}]
+    # snapshot without a pane list: the live tab keeps the unclassified card
+    mod.sweep(mod.load_cards(), [{"pane_id": "p1"}], tabs, [])
+    assert "p2" in mod.load_cards()
+    # pane list is authoritative: the vanished pane drops the card
+    mod.sweep(mod.load_cards(), [{"pane_id": "p1"}], tabs,
+              [{"pane_id": "p1", "tab_id": "t1"}])
+    assert "p2" not in mod.load_cards()
+    # the pane is listed again: the card survives
+    mod.save_card({"pane_id": "p2", "herdr": True, "tab_id": "t1"})
+    mod.sweep(mod.load_cards(), [], [], [{"pane_id": "p2", "tab_id": "t1"}])
+    assert "p2" in mod.load_cards()
+    # pane and tab both gone: dropped
+    mod.sweep(mod.load_cards(), [], [{"tab_id": "t9"}],
+              [{"pane_id": "p1", "tab_id": "t1"}])
+    assert "p2" not in mod.load_cards()
+    # cards outside herdr are never swept
+    mod.save_card({"pane_id": "ext-tty1", "herdr": False})
+    mod.sweep(mod.load_cards(), [], [], [])
+    assert "ext-tty1" in mod.load_cards()
+
+
+def test_gather_columns_refreshes_and_sweeps(state: Path,
+                                             monkeypatch: pytest.MonkeyPatch):
+    """gather_columns merges snapshot, cards, and probes into fresh columns.
+
+    Args:
+        state: Isolated state directory fixture.
+        monkeypatch: pytest fixture stubbing the herdr snapshot and /proc scan.
+    """
+    mod.save_card({"pane_id": "p2", "herdr": True, "tab_id": "t1",
+                   "header": "earth", "agent": "cline", "status": "board work",
+                   "updated": 995.0})
+    mod.save_card({"pane_id": "p9", "herdr": True, "tab_id": "tGone"})
+    monkeypatch.setattr(mod, "scan_procs", lambda: ({}, {}))
+    monkeypatch.setattr(mod, "detect_pane_agents", lambda b, p, a: {})
+    monkeypatch.setattr(mod, "herdr_snapshot", lambda b: (
+        [{"pane_id": "p1", "tab_id": "t1", "agent": "omp",
+          "agent_status": "working", "cwd": "/x"}],
+        [{"tab_id": "t1", "label": "earth"}],
+        [{"pane_id": "p1", "tab_id": "t1"}, {"pane_id": "p2", "tab_id": "t1"}]))
+    cols, herdr_ok = mod.gather_columns("herdr", 1000.0, 600)
+    assert herdr_ok is True
+    assert {c["pane"] for c in cols} == {"p1", "p2"}
+    assert "p9" not in mod.load_cards()   # dead tab swept from disk
+    assert "p2" in mod.load_cards()
+
+    monkeypatch.setattr(mod, "herdr_snapshot", lambda b: (None, [], []))
+    cols, herdr_ok = mod.gather_columns("herdr", 1000.0, 600)
+    assert herdr_ok is False
+    assert cols == []                     # herdr cards hidden while unreachable
+    assert "p2" in mod.load_cards()       # but never deleted
+
+
 # ---------------------------------------------------------------------------
 # rendering
 # ---------------------------------------------------------------------------
@@ -649,6 +852,17 @@ def test_head_parts_badge_extraction_and_prepend():
 
     unknown = col(agent="weird", header="whatever", tab_name="")
     assert [k for _, k in mod.head_parts(unknown)] == [None, "desc"]
+
+
+def test_cline_badge_symbol_and_agent_aliases():
+    """cline and freebuff are known agent kinds carrying a CL/FB badge."""
+    assert mod.AGENT_ALIASES["cline"] == {"cline"}
+    assert mod.AGENT_ALIASES["freebuff"] == {"freebuff"}
+    assert mod.AGENT_KIND_BY_NAME["freebuff"] == "freebuff"
+    assert mod.AGENT_BADGE["cline"] == ("CL", ())
+    cl = col(chip="unknown", agent="cline", header="> fix the build")
+    assert (" CL", "badge") in mod.head_parts(cl)
+    assert "CL" in mod.compact_line(cl, 60)
 
 
 def test_column_lines_header_on_one_row():
@@ -930,6 +1144,15 @@ def test_cli_bad_action_rejected(run):
     """
     proc = run("note", "explode", "-m", "x")
     assert proc.returncode == 2
+
+
+def test_build_parser_default_refresh_is_30s():
+    """The CLI defaults to a 30 s refresh and accepts explicit overrides."""
+    ap = mod.build_parser()
+    assert ap.parse_args([]).poll_period == 30.0
+    assert ap.parse_args(["--autorefresh", "5"]).poll_period == 5.0
+    assert ap.parse_args(["--poll-period", "2"]).poll_period == 2.0
+    assert ap.parse_args(["serve"]).cmd == "serve"
 
 
 def test_wrapper_help():

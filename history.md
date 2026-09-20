@@ -6,6 +6,65 @@
 > alternatives. Rules: see `.agentrules` (History Rule) and
 > `docs/development.md`.
 
+## 2.5.20260920140934Z - 2026-09-20
+
+Board fixes requested against the live session (6 tabs, 20 panes):
+
+- **Refresh default 2 s → 30 s.** The bash `agent_board view` wrapper
+  already defaulted to `--autorefresh 30`, but the Python default was 2 s,
+  so `agent_board.py`, `./_run`, `--once`, and `agent_board.py serve`
+  refreshed four times faster than documented. The default now lives in
+  argparse (30 s; minimum 1 s still enforced via `max(1.0, ...)`), and
+  parser construction moved into `build_parser()` so a test asserts it.
+  `serve` inherits 30 s too; `serve --poll-period 2` restores the lively
+  frame file.
+- **One column per agent pane, not per tab.** Reproduced live: the
+  `media_downloader` and `quizza_app` tabs were running freebuff agents,
+  but herdr reported both tabs as `agent_status: unknown` with no
+  classified agent, so the board showed only a `(? unknown) <tab>`
+  placeholder. Root cause: `build_columns()` iterated the herdr *agent*
+  list, and `sweep()` deleted the card of any pane missing from that same
+  list, so an agent posting from a pane herdr did not classify lost its
+  column on the next refresh (the shape of the reported "two agents in one
+  tab, only one shown"). Fix: `herdr_snapshot()` returns agents + tabs +
+  panes; every unclassified pane that has a card or a known agent process
+  in its foreground (`herdr pane process-info`, one ~7 ms call per such
+  pane, RSS from `/proc`) gets its own column. Verified live:
+  media_downloader and quizza_app now render real `FB freebuff` columns
+  (pid 3632586 / 1541444) instead of placeholders.
+  Limitation kept on purpose: the probe sees foreground processes only, so
+  an agent that runs in the background of a pane (or headless without a
+  pane, like a systemd-spawned cline connector) is shown through its own
+  posted card, not through the probe.
+- **Tab liveness before every refresh.** `sweep(cards, agents, tabs,
+  panes)` keeps a card while its pane is live, and - when the snapshot
+  carries no pane list - while its tab is live; a closed pane or tab
+  removes the column immediately, and an unreachable snapshot sweeps
+  nothing.
+- **`CL` badge for cline** in `AGENT_BADGE`; cline and freebuff added to
+  `AGENT_ALIASES`/`AGENT_KIND_BY_NAME` so the pane probe and pid/mem
+  resolution know them.
+- **`herdr_match()` narrowed.** It used to match a tab id as eagerly as a
+  pane id, so a second agent in a tab inherited the first one's kind and
+  title at register time. It now matches the exact pane first and uses a
+  tab only when no pane id was given and the tab hosts exactly one agent.
+- Housekeeping: the separate commit before this change lowercased the
+  board skill to `skills/agent-board/skill.md`; agent-watch only moved its
+  version stamp with the release (no code change).
+
+Rejected alternatives:
+
+- Matching agent processes by pane `cwd` through `/proc` instead of
+  `herdr pane process-info`: the live probe showed agent processes whose
+  cwd differs from the pane's cwd, so cwd matching would have produced
+  misses and false positives.
+- Relying on `herdr pane report-agent` (the custom-agent API): it requires
+  the agent to report itself, while the board should show what actually
+  runs in a tab.
+- Creating a card automatically for every detected agent process: the
+  board stays card-driven for text (what the agent says) and
+  probe-driven for presence (that it runs).
+
 ## 2.4.20260915185906Z - 2026-09-15
 
 `agent_watch.py` launcher shim removed. `~/sbin/agent-watch` now points

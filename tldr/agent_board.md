@@ -43,7 +43,13 @@ journalctl --user -u agent_board -f
 ## Notes
 
 - The column header is the agent's herdr tab title, captured at register.
-- Every herdr tab gets a column; tabs whose agent cannot be classified
-  show as `? unknown`.
+- Every agent pane gets a column: one tab can show several agents side by
+  side (herdr-classified ones, panes that posted a card, and known agent
+  processes found in the pane, e.g. an unclassified cline or freebuff).
+  Tabs without any agent show as `? unknown`.
+- Refresh (TUI, `--once`, service frame) defaults to 30 s:
+  `--poll-period` / `--autorefresh SECONDS` overrides it (minimum 1).
+- Every refresh re-reads the snapshot and drops the columns whose pane or
+  tab is gone.
 - Status chips: `● working`, `❯ needs input`, `■ stopped`, `blocked`,
   `○ idle`, `✓ done`, `+ external`, `! stale`.

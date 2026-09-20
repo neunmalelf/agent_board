@@ -5,6 +5,35 @@ All notable changes, newest first. Versions are
 `src/agent_board/` `__version__`). Detailed reasoning, decisions, and
 release notes live in `history.md`; user-facing highlights in `NEWS.md`.
 
+## 2.5.20260920140934Z - 2026-09-20
+
+- Refresh default 2 s → 30 s for every mode (`--poll-period` /
+  `--autorefresh SECONDS` overrides, minimum 1 s; the serve loop passes
+  `--poll-period 2` for a lively frame file). Parser construction moved
+  into `build_parser()` so the default is testable; `main()` parses once
+  and dispatches.
+- One column per agent pane instead of one per tab: `herdr_snapshot()`
+  now returns agents, tabs, and panes; `build_columns()` gained
+  `panes`/`pane_agents` and renders a column for every unclassified pane
+  that has a card or a probed agent process (`pane_agent()`,
+  `detect_pane_agents()` via `herdr pane process-info` + `pid_rss()`).
+  A tab without any agent keeps its `(? unknown)` fallback column.
+- Liveness re-check per refresh: `sweep()` takes tabs and panes and drops
+  a herdr card only when its pane and tab are both gone; a card whose
+  pane herdr did not classify survives while the tab is open.
+- `herdr_match()` prefers the exact pane id and only falls back to a tab
+  that hosts exactly one agent, so a second agent in a tab can no longer
+  be mislabeled with the first one's kind. `note register` takes the
+  header from the pane's title, records the pane's tab id, marks snapshot
+  panes as herdr-owned, and probes the pane process for its agent kind.
+- `AGENT_BADGE` gains cline → `CL`; `AGENT_ALIASES` gains cline and
+  freebuff (pane probe, pid/mem resolution).
+- Refresh is one `gather_columns()` call for TUI, `--once`, and serve;
+  it costs ~0.15 s on a 6-tab/20-pane session (16 pane probes).
+- Tests 51 → 63; README, README columns/removal notes, `man/agent_board.1`
+  (default 30, pane/tab coverage), `tldr/agent_board.md`, `NEWS.md`.
+  agent-watch stamp moved with the release (no code change).
+
 ## 2.4.20260915172753Z - 2026-09-15
 
 - README: "Platforms" section (Linux supported; macOS partial - no

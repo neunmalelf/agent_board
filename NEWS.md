@@ -3,6 +3,26 @@
 User-visible highlights per release. Full details: `ChangeLog.md`;
 decisions and reasoning: `history.md` (newest on top).
 
+## 2.5 (2026-09-20)
+
+- **30 s refresh by default**: the fullscreen TUI, `--once`, and the
+  service frame writer now refresh every 30 s instead of 2 s (matching
+  `agent_board view`). `--poll-period` / `--autorefresh SECONDS` overrides
+  it (minimum 1 s) - `agent_board.py serve --poll-period 2` keeps the old
+  frame cadence.
+- **Every agent in a herdr tab is shown**: one column per agent pane, not
+  one per tab. Besides the agents herdr classifies, the board shows panes
+  that posted a status card and known agent processes found in the pane's
+  foreground (`herdr pane process-info`) - so a second agent in a tab
+  (for example an unclassified cline or freebuff instance) no longer stays
+  invisible; it gets its own column with pid and memory.
+- **Tab liveness before every refresh**: the snapshot is re-read each
+  cycle. A herdr-owned card is swept only when its pane and its tab are
+  both gone, so an agent herdr never classified keeps its column while its
+  tab is open, and a closed tab leaves the view right away.
+- **`CL` badge for cline**, plus `cline` and `freebuff` as known agent
+  kinds so their pid/mem resolve like any other agent.
+
 ## 2.4 (2026-09-15)
 
 - **Platforms documented** in the README: Linux fully supported; macOS

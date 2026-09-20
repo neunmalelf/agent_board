@@ -57,12 +57,14 @@ agent_board logs [n]    # last n journal lines of the service
 ```
 
 `agent_board start` runs the board as a systemd user service
-(`agent_board.service` → `agent_board.py serve`): every 2 s it renders the
-board to `~/.local/state/agent_board/board.txt`. `agent_board status`
-prints the service state and that frame, so the board is readable anywhere
-(including `watch -c "cat ~/.local/state/agent_board/board.txt"`).
+(`agent_board.service` → `agent_board.py serve`): every 30 s it re-renders
+the board to `~/.local/state/agent_board/board.txt` (`agent_board.py serve
+--poll-period 2` for a livelier frame file). `agent_board status` prints the
+service state and that frame, so the board is readable anywhere (including
+`watch -c "cat ~/.local/state/agent_board/board.txt"`).
 For the interactive fullscreen TUI run `agent_board.py` or `agent_board view`
-(`view` refreshes the live data every 30 s; `--autorefresh N` overrides).
+(both refresh the live data every 30 s; `--poll-period`/`--autorefresh N`
+overrides, minimum 1 s).
 
 ### Columns
 
@@ -87,25 +89,34 @@ Each live agent gets one column:
   line.
 - **Agent badge** = cyan agent symbol. omp's `π` and opencode's `OC`/
   `OpenCode` are colored in place when the tab title starts with them;
-  agents whose titles carry no symbol get one prepended (agy → `AG`).
-  freebuff agents get the `FB` badge prepended.
-- **Tab coverage** = every herdr tab gets a column. Tabs whose agent
-  herdr could not detect render as `(? unknown) <tab label>` with no
-  meta beyond the tab id, so tabs like `mediadownloader_webui` never
-  vanish from the board. Agents outside herdr's built-in list (e.g.
-  freebuff) can be classified via herdr's custom-agent API -
+  agents whose titles carry no symbol get one prepended (agy → `AG`,
+  cline → `CL`). freebuff agents get the `FB` badge prepended.
+- **Tab coverage** = every agent pane gets a column, so one herdr tab can
+  show several agents side by side. A pane qualifies when herdr classified
+  its agent, when a card was posted for it, or when a known agent process
+  runs in its foreground (`herdr pane process-info`, so cline/freebuff
+  instances herdr did not classify still appear, with pid/mem). Tabs
+  without any agent get one fallback column rendered as
+  `(? unknown) <tab label>` with no meta beyond the tab id, so tabs like
+  `mediadownloader_webui` never vanish from the board. Agents outside
+  herdr's built-in list (e.g. freebuff) can additionally be classified via
+  herdr's custom-agent API -
   `herdr pane report-agent <pane> --source custom:<name> --agent <kind>
-  --state working|idle|blocked` - after which they render as a normal
+  --state working|idle|blocked` - after which they render like any other
   column, including pid/mem resolution and their `AGENT_BADGE` badge.
   Un-classified tabs that merely run non-agent processes stay
-  `(? unknown)` by design.
+  `(? unknown)` by design. Processes that only run in the background of a
+  pane (or headless, without a pane at all) are not in that probe's
+  foreground list; those agents show up when they post a card.
 - **pid + mem** - resolved per agent from `/proc` (herdr's snapshot carries
   no pid): matched by agent-kind alias + cwd, external cards by their pts
   tty.
 - **Text + trail** - what the agent posted: current line plus its last
   steps with timestamps.
-- **Removal**: herdr pane closed → column vanishes automatically (the
-  snapshot is the liveness truth; stale card files are swept). Agents
+- **Removal**: before every refresh the snapshot is re-read; a column
+  disappears as soon as its pane is gone, and a herdr-owned card is swept
+  once neither its pane nor its tab exists any more (a card whose pane
+  herdr never classified survives while its tab stays open). Agents
   outside herdr post with an `ext-*` id; their column drops on
   `note stop` or after `--stale-seconds` (600).
 
@@ -137,10 +148,12 @@ q quits, j/k scroll.
 python3 -m pytest tests/ -q     # raw pytest
 ```
 
-49 tests cover text helpers, reset parsing, card storage, every `note`
-action (incl. `input`/`quota` flag lifecycles), column building (chip
-priority, sorting, tab fallback, sweep), rendering (plain/ANSI/compact,
-badges, countdowns), help coloring, process resolution, and the CLI +
+63 tests cover text helpers, reset parsing, card storage, every `note`
+action (incl. `input`/`quota` flag lifecycles), snapshot parsing (agents,
+tabs, panes), the pane process probe, column building (chip priority,
+sorting, several agents per tab, tab fallback, liveness sweep, refresh
+glue), rendering (plain/ANSI/compact, badges incl. cline, countdowns),
+help coloring, process resolution, the 30 s refresh default, and the CLI +
 wrapper end-to-end in an isolated state dir. `./_tests` additionally runs
 `ruff check src tests` and `mypy src/agent_board`. Run it after every
 change to the package; the pre-commit hook enforces it.

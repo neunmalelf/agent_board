@@ -11,8 +11,12 @@ agent_board.py \- live status board for coding agents
 .B agent_board.py
 renders a live status board with one vertical column per coding agent.
 Agents register and post one-line statuses; herdr's api snapshot is the
-source of truth for liveness (a column disappears the moment the agent's
-pane closes). Columns are colored: green while working, yellow while
+source of truth for liveness (a column disappears the moment its pane closes).
+Before every refresh the board re-reads that snapshot and drops the columns
+whose pane or tab is gone. Every agent pane of a tab gets its own column, so
+one tab can show several agents side by side, including agents herdr did not
+classify (found as known agent processes in the pane, or via their own status
+card). Columns are colored: green while working, yellow while
 waiting for input, red when stopped by a rate/quota limit, cyan when idle.
 .PP
 Run \fBagent_board\fR (the wrapper) for the fullscreen TUI and service
@@ -30,7 +34,7 @@ Render one frame and exit (no curses).
 Compact layout: one line per agent, two columns.
 .TP
 .B \-\-poll\-period, \-\-autorefresh \fISECONDS\fR
-Snapshot poll / frame autorefresh period (default: 2.0).
+Snapshot poll / frame autorefresh period (default: 30, minimum: 1).
 .TP
 .B \-\-stale\-seconds \fISECONDS\fR
 External card age before "stale" (default: 600).

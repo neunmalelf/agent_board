@@ -13,10 +13,14 @@ one-line status of what they are doing, updating it until the task is closed:
 
 Each agent is one vertical column; the column header is the agent's herdr
 tab title ("project name"), captured at register time. herdr's api snapshot
-is the source of truth for liveness: a column disappears the moment the
-agent's pane closes. Cards carry the free-text progress ("what is it doing",
-"what has it done"). Agents outside herdr get a column too; it disappears on
-`note stop` or after --stale-seconds without an update.
+is the source of truth for liveness: a column disappears the moment its pane
+(and with it its tab) closes. Every agent pane of a tab gets its own column,
+so one tab can show several agents side by side: herdr-classified agents,
+agents that only posted a card, and known agent processes found in the pane's
+foreground (herdr pane process-info) even when herdr did not classify them.
+Cards carry the free-text progress ("what is it doing", "what has it done").
+Agents outside herdr get a column too; it disappears on `note stop` or after
+--stale-seconds without an update.
 
 Run `agent-board` for the fullscreen TUI; `agent_board.py --once` prints a
 single frame (useful for logging or `watch`).
@@ -35,7 +39,7 @@ import sys
 import time
 from datetime import datetime
 
-__version__ = "2.4.20260915185906Z"
+__version__ = "2.5.20260920140934Z"
 
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
@@ -182,54 +186,142 @@ def drop_card(pane_id: str) -> None:
 # herdr snapshot: the authoritative agent registry
 # --------------------------------------------------------------------------
 
-def herdr_agents(herdr_bin: str) -> tuple[list | None, list]:
-    """(live agents, snapshot tabs), or (None, []) when unreachable.
-
-    usage: herdr_agents <HERDR_BIN>
-    returns: (agents, tabs) lists parsed from the herdr api snapshot on success.
-    errors: (None, []) when herdr exits nonzero, cannot be run, or returns malformed JSON.
+def herdr_json(herdr_bin: str, *args: str, timeout: float = 10) -> dict | None:
+    """Run one herdr subcommand and parse its JSON output.
 
     Args:
-        herdr_bin (str): Path or name of the herdr binary to query.
+        herdr_bin: Path or name of the herdr binary to run.
+        args: herdr subcommand and options, e.g. "api", "snapshot".
+        timeout: Seconds before herdr is killed.
+
+    Returns:
+        The parsed JSON object, or None when herdr exits nonzero, cannot be
+        run, times out, or emits invalid JSON.
+
+    Example:
+        data = herdr_json("herdr", "api", "snapshot")
+    """
+    try:
+        out = subprocess.run([herdr_bin, *args], capture_output=True,
+                             text=True, timeout=timeout)
+        if out.returncode != 0:
+            return None
+        data = json.loads(out.stdout)
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def herdr_snapshot(herdr_bin: str) -> tuple[list | None, list, list]:
+    """Read the live herdr session as (agents, tabs, panes).
+
+    Args:
+        herdr_bin: Path or name of the herdr binary to query.
+
+    Returns:
+        The agent, tab, and pane lists of the snapshot. Agents is None when
+        the snapshot is unreachable; tabs and panes are then empty. The pane
+        list covers every pane of every tab, so agents herdr did not classify
+        stay visible to the board.
+
+    Example:
+        agents, tabs, panes = herdr_snapshot("herdr")
+    """
+    data = herdr_json(herdr_bin, "api", "snapshot")
+    snap = ((data or {}).get("result") or {}).get("snapshot") or {}
+    agents = snap.get("agents", [])
+    if data is None or not snap or not isinstance(agents, list):
+        return None, [], []
+    tabs = [t for t in snap.get("tabs") or [] if t.get("tab_id")]
+    panes = [p for p in snap.get("panes") or [] if p.get("pane_id")]
+    return agents, tabs, panes
+
+
+def herdr_agents(herdr_bin: str) -> tuple[list | None, list]:
+    """Read the live herdr agents together with the snapshot tab list.
+
+    Args:
+        herdr_bin: Path or name of the herdr binary to query.
+
+    Returns:
+        (agents, tabs) from herdr_snapshot(); agents is None when the
+        snapshot cannot be read.
 
     Example:
         agents, tabs = herdr_agents("herdr")
     """
+    agents, tabs, _ = herdr_snapshot(herdr_bin)
+    return agents, tabs
+
+
+def herdr_pane_processes(herdr_bin: str, pane_id: str) -> list:
+    """List the foreground processes of one herdr pane.
+
+    Args:
+        herdr_bin: Path or name of the herdr binary to query.
+        pane_id: Pane whose foreground processes should be listed.
+
+    Returns:
+        The process dicts (name, pid, cwd, argv) reported by
+        `herdr pane process-info`, or [] when the pane is unknown to herdr or
+        herdr cannot be queried.
+
+    Example:
+        procs = herdr_pane_processes("herdr", "w1:p68")
+    """
+    data = herdr_json(herdr_bin, "pane", "process-info", "--pane", pane_id,
+                      timeout=5)
+    info = ((data or {}).get("result") or {}).get("process_info") or {}
+    procs = info.get("foreground_processes")
+    return procs if isinstance(procs, list) else []
+
+
+def pid_rss(pid: int | None) -> int | None:
+    """Read the resident-set size of one process from /proc.
+
+    Args:
+        pid: Process id to inspect; None short-circuits to None.
+
+    Returns:
+        VmRSS in KiB, or None when the pid is missing or unreadable.
+
+    Example:
+        pid_rss(4242)
+    """
+    if not pid:
+        return None
     try:
-        out = subprocess.run([herdr_bin, "api", "snapshot"],
-                             capture_output=True, text=True, timeout=10)
-        if out.returncode != 0:
-            return None, []
-        data = json.loads(out.stdout)
-        snap = data.get("result", {}).get("snapshot", {})
-        agents = snap.get("agents", [])
-        if not isinstance(agents, list):
-            return None, []
-        tabs = [t for t in snap.get("tabs") or [] if t.get("tab_id")]
-        return agents, tabs
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return None, []
+        with open(f"/proc/{pid}/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
 
 
 def herdr_match(agents: list | None, pane_id: str, tab_id: str) -> dict | None:
-    """Find the herdr agent matching a pane or tab id.
-
-    usage: herdr_match <AGENTS> <PANE_ID> <TAB_ID>
-    returns: The matching agent dict, or None when no entry matches.
+    """Find the herdr agent of a pane, or of a tab that hosts exactly one.
 
     Args:
-        agents (list, optional): herdr agent dicts; None or empty searches nothing.
-        pane_id (str): Pane id to match; empty skips this criterion.
-        tab_id (str): Tab id to match; empty skips this criterion.
+        agents: herdr agent dicts; None or empty searches nothing.
+        pane_id: Pane id to match; empty skips the pane lookup.
+        tab_id: Tab id to match when no pane id was given; a tab hosting
+            several agents is ambiguous and matches nothing.
+
+    Returns:
+        The matching agent dict, or None when no unambiguous entry matches.
 
     Example:
-        agent = herdr_match(agents, "p-1a2b", "")
+        agent = herdr_match(agents, "w1:p6A", "")
     """
     for a in agents or []:
         if pane_id and a.get("pane_id") == pane_id:
             return a
-        if tab_id and a.get("tab_id") == tab_id:
-            return a
+    if tab_id and not pane_id:
+        in_tab = [a for a in agents or [] if a.get("tab_id") == tab_id]
+        if len(in_tab) == 1:
+            return in_tab[0]
     return None
 
 
@@ -301,15 +393,15 @@ def parse_reset(text: str | None, now: float) -> float | None:
 
 
 def cmd_note(ns: argparse.Namespace, herdr_bin: str) -> int:
-    """Handle `note <action>`: create, update, or remove this agent's card.
-
-    usage: cmd_note <NS> <HERDR_BIN>
-    returns: 0 after posting, updating, or removing the card.
-    errors: 2 when -m/--msg is missing for an action that requires it.
+    """Handle the note actions: create, update, or remove this agent's card.
 
     Args:
-        ns (argparse.Namespace): Parsed `note` subcommand arguments.
-        herdr_bin (str): herdr binary used to look up the agent snapshot.
+        ns: Parsed `note` subcommand arguments.
+        herdr_bin: herdr binary used to look up the agent snapshot.
+
+    Returns:
+        0 after posting, updating, or removing the card; 2 when -m/--msg is
+        missing for an action that requires it.
 
     Example:
         cmd_note(ns, "herdr")
@@ -333,19 +425,28 @@ def cmd_note(ns: argparse.Namespace, herdr_bin: str) -> int:
         return 2
     msg = ns.msg.strip()[:MAX_MSG]
 
-    agents, _ = herdr_agents(herdr_bin)
+    agents, _tabs, panes = herdr_snapshot(herdr_bin)
     match = herdr_match(agents, pane, tab)
+    pane_info = next((p for p in panes if str(p.get("pane_id")) == pane), None)
     card = read_card(path)
 
     if ns.action == "register" or card is None:
         header = (ns.header or "").strip()
+        source = match or pane_info or {}
         if not header:
-            title = clean_title(match.get("terminal_title_stripped")
-                                or match.get("terminal_title") or "") if match else ""
+            title = clean_title(source.get("terminal_title_stripped")
+                                or source.get("terminal_title") or "")
             header = title or f"{socket.gethostname()}:{os.getcwd()}"
+        if not tab and pane_info:
+            tab = str(pane_info.get("tab_id") or "")
+        kind = ns.agent or (match or {}).get("agent") or ""
+        if not kind and pane_info:
+            kind = pane_agent(herdr_bin, pane)[0]  # herdr did not classify it
         card = {"pane_id": pane, "tab_id": tab, "header": header[:MAX_HEADER],
-                "agent": ns.agent or (match or {}).get("agent") or "",
-                "herdr": ns.pane is None and bool(os.environ.get("HERDR_PANE_ID")),
+                "agent": kind,
+                "herdr": bool((ns.pane is None
+                               and os.environ.get("HERDR_PANE_ID"))
+                              or pane_info),
                 "status": "", "log": [], "created": now, "updated": now,
                 "done": False}
         if ns.action == "register":
@@ -390,8 +491,12 @@ AGENT_ALIASES = {
     "codex": {"codex"}, "claude": {"claude"}, "gemini": {"gemini"},
     "amp": {"amp"}, "droid": {"droid"}, "grok": {"grok"}, "kimi": {"kimi"},
     "cursor": {"cursor"}, "devin": {"devin"}, "qwen": {"qwen", "qwen-code"},
-    "kilo": {"kilo"}, "qoder": {"qoder"},
+    "kilo": {"kilo"}, "qoder": {"qoder"}, "cline": {"cline"},
+    "freebuff": {"freebuff"},
 }
+# Reverse map: process name -> agent kind, for the pane process probe.
+AGENT_KIND_BY_NAME = {name: kind for kind, names in AGENT_ALIASES.items()
+                      for name in names}
 
 
 def rss_str(kb: int | None) -> str:
@@ -505,29 +610,90 @@ def resolve_ext_proc(pane_id: str, procs: tuple | None) -> tuple[int | None, int
     return (best[0], best[2]) if best else (None, None)
 
 
+def pane_agent(herdr_bin: str, pane_id: str) -> tuple[str, int | None, int | None]:
+    """Find the agent process of a pane, whether herdr classified it or not.
+
+    Args:
+        herdr_bin: Path or name of the herdr binary to query.
+        pane_id: Pane whose foreground processes should be checked.
+
+    Returns:
+        (kind, pid, rss_kb) of the largest known agent process running in the
+        pane, or ("", None, None) when no known agent runs there.
+
+    Example:
+        kind, pid, rss = pane_agent("herdr", "w1:p68")
+    """
+    best: tuple[str, int | None, int | None] | None = None
+    for proc in herdr_pane_processes(herdr_bin, pane_id):
+        kind = AGENT_KIND_BY_NAME.get(str(proc.get("name") or "").lower())
+        if not kind:
+            continue
+        pid = proc.get("pid")
+        pid = pid if isinstance(pid, int) else None
+        rss = pid_rss(pid)
+        if best is None or (rss or 0) > (best[2] or 0):
+            best = (kind, pid, rss)
+    return best or ("", None, None)
+
+
+def detect_pane_agents(herdr_bin: str, panes: list, agents: list | None) -> dict:
+    """Probe the panes herdr did not classify for known agent processes.
+
+    Args:
+        herdr_bin: Path or name of the herdr binary to query.
+        panes: Snapshot pane dicts to inspect.
+        agents: Snapshot agent dicts; herdr-classified panes are skipped.
+
+    Returns:
+        {pane_id: {"agent": kind, "pid": pid, "rss": rss_kb}} for every
+        unclassified pane that runs a known agent process, else {}.
+
+    Example:
+        found = detect_pane_agents("herdr", panes, agents)
+    """
+    classified = {str(a.get("pane_id")) for a in agents or [] if a.get("pane_id")}
+    found: dict = {}
+    for p in panes:
+        pane = str(p.get("pane_id"))
+        if not pane or pane in classified:
+            continue
+        kind, pid, rss = pane_agent(herdr_bin, pane)
+        if kind:
+            found[pane] = {"agent": kind, "pid": pid, "rss": rss}
+    return found
+
+
 # --------------------------------------------------------------------------
 # viewer: merge snapshot + cards into columns
 # --------------------------------------------------------------------------
 
 def build_columns(agents: list | None, cards: dict, now: float, stale_after: float,
-                  procs: tuple | None = None, tabs: list | None = None) -> list:
-    """Merge herdr agents (liveness) with posted cards (free text).
-
-    usage: build_columns <AGENTS> <CARDS> <NOW> <STALE_AFTER> [PROCS] [TABS]
-    returns: Column dicts sorted by status priority, then card age.
+                  procs: tuple | None = None, tabs: list | None = None,
+                  panes: list | None = None, pane_agents: dict | None = None) -> list:
+    """Merge herdr agents, panes, and posted cards into board columns.
 
     Args:
-        agents (list, optional): herdr agent dicts; None = snapshot unavailable, so
+        agents: herdr agent dicts; None means the snapshot is unavailable, so
             herdr-owned cards are hidden (unknown liveness) but not deleted.
-        cards (dict): Posted cards keyed by pane_id.
-        now (float): Current epoch time, base for card ages and staleness.
-        stale_after (float): External card age in seconds before the "stale" chip.
-        procs (tuple, optional): (by_tty, by_kind) from scan_procs() for pid/RSS lookup.
-        tabs (list, optional): Snapshot tab list; every tab without a detected agent gets
-            its own column (agent kind unknown) so no herdr tab can go missing.
+        cards: Posted cards keyed by pane_id.
+        now: Current epoch time, base for card ages and staleness.
+        stale_after: External card age in seconds before the "stale" chip.
+        procs: (by_tty, by_kind) from scan_procs() for pid/RSS lookup.
+        tabs: Snapshot tab list; every tab without an agent gets a fallback
+            column (agent kind unknown) so no herdr tab can go missing.
+        panes: Snapshot pane list; panes without a herdr-classified agent but
+            with a card or a probed agent process of their own get a column,
+            so a tab can show every agent running in it.
+        pane_agents: {pane_id: {"agent", "pid", "rss"}} from
+            detect_pane_agents() for the panes herdr did not classify.
+
+    Returns:
+        Column dicts sorted by status priority, then card age.
 
     Example:
-        cols = build_columns(agents, cards, time.time(), 600.0, procs=procs, tabs=tabs)
+        cols = build_columns(agents, cards, time.time(), 600.0, tabs=tabs,
+                             panes=panes, pane_agents=found)
     """
     labels = {t["tab_id"]: t.get("label") or "" for t in tabs or []
               if t.get("tab_id")}
@@ -552,6 +718,41 @@ def build_columns(agents: list | None, cards: dict, now: float, stale_after: flo
                      else "input" if card.get("input")
                      else (a.get("agent_status") or "unknown")),
             "focused": bool(a.get("focused")),
+            "text": status_text(card, now),
+            "log": card.get("log") or [],
+            "age": (now - card["updated"]) if card.get("updated") else None,
+            "pid": pid, "rss": rss,
+        })
+
+    covered = {c["pane"] for c in cols}
+    for p in panes or []:
+        pane = str(p.get("pane_id") or "")
+        if not pane or pane in covered:
+            continue  # herdr already classified this pane, or it is empty
+        card = cards.get(pane) or {}
+        found = (pane_agents or {}).get(pane) or {}
+        kind = card.get("agent") or found.get("agent") or ""
+        if not card and not kind:
+            continue  # plain shell or tool pane: not an agent
+        header = (card.get("header")
+                  or clean_title(p.get("terminal_title_stripped")
+                                 or p.get("terminal_title") or "")
+                  or p.get("cwd") or pane)
+        pid, rss = found.get("pid"), found.get("rss")
+        if pid is None and kind:
+            pid, rss = resolve_proc(kind, str(p.get("cwd") or ""), procs)
+        tab = str(p.get("tab_id") or card.get("tab_id") or "")
+        cols.append({
+            "pane": pane,
+            "agent": kind,
+            "tab": tab,
+            "tab_name": labels.get(tab, ""),
+            "header": header[:MAX_HEADER],
+            "chip": ("done" if card.get("done")
+                     else "stopped" if card.get("stopped")
+                     else "input" if card.get("input")
+                     else (p.get("agent_status") or "unknown")),
+            "focused": bool(p.get("focused")),
             "text": status_text(card, now),
             "log": card.get("log") or [],
             "age": (now - card["updated"]) if card.get("updated") else None,
@@ -611,26 +812,62 @@ def build_columns(agents: list | None, cards: dict, now: float, stale_after: flo
     return cols
 
 
-def sweep(cards: dict, agents: list | None) -> None:
-    """Delete herdr-owned cards whose pane has closed (agent stopped).
-
-    usage: sweep <CARDS> <AGENTS>
-    returns: None; matching card files are removed, or nothing happens when
-        agents is None (snapshot unavailable: keep everything).
+def sweep(cards: dict, agents: list | None, tabs: list | None = None,
+          panes: list | None = None) -> None:
+    """Delete cards whose herdr pane (and tab) has closed.
 
     Args:
-        cards (dict): Cards keyed by pane_id, as returned by load_cards().
-        agents (list, optional): Live herdr agent dicts; None disables sweeping.
+        cards: Cards keyed by pane_id, as returned by load_cards().
+        agents: Live herdr agent dicts; None disables sweeping because the
+            snapshot is unreachable.
+        tabs: Live snapshot tab dicts; a card whose pane is unknown to herdr
+            survives while its tab is still open.
+        panes: Live snapshot pane dicts; when present, pane liveness is
+            authoritative and a vanished pane drops its card.
+
+    Returns:
+        None; matching card files are removed.
 
     Example:
-        sweep(cards, agents)
+        sweep(cards, agents, tabs, panes)
     """
     if agents is None:
         return  # snapshot unavailable: keep everything
-    live = {str(a.get("pane_id")) for a in agents}
+    live_panes = {str(a.get("pane_id")) for a in agents if a.get("pane_id")}
+    if panes:
+        live_panes |= {str(p.get("pane_id")) for p in panes if p.get("pane_id")}
+    live_tabs = {str(t.get("tab_id")) for t in tabs or [] if t.get("tab_id")}
     for pane, card in cards.items():
-        if card.get("herdr") and pane not in live:
-            drop_card(pane)
+        if not card.get("herdr") or pane in live_panes:
+            continue
+        tab = str(card.get("tab_id") or "")
+        if not panes and tab and tab in live_tabs:
+            continue  # no pane list in this snapshot: its live tab is enough
+        drop_card(pane)
+
+
+def gather_columns(herdr_bin: str, now: float, stale_after: float) -> tuple[list, bool]:
+    """Refresh the whole board: snapshot, sweep, pane probe, then merge.
+
+    Args:
+        herdr_bin: Path or name of the herdr binary to query.
+        now: Current epoch time for card ages and the quota countdown.
+        stale_after: External card age in seconds before the "stale" chip.
+
+    Returns:
+        (columns, herdr_ok); herdr_ok is False when the snapshot was
+        unreachable, in which case herdr-owned cards are kept but not shown.
+
+    Example:
+        cols, herdr_ok = gather_columns("herdr", time.time(), 600.0)
+    """
+    agents, tabs, panes = herdr_snapshot(herdr_bin)
+    cards = load_cards()
+    sweep(cards, agents, tabs, panes)
+    pane_agents = detect_pane_agents(herdr_bin, panes, agents) if panes else {}
+    cols = build_columns(agents, cards, now, stale_after, procs=scan_procs(),
+                         tabs=tabs, panes=panes, pane_agents=pane_agents)
+    return cols, agents is not None
 
 
 def age_str(seconds: float | None) -> str:
@@ -718,6 +955,7 @@ AGENT_BADGE = {
     "opencode": ("OC", ("OpenCode", "OC")),
     "agy": ("AG", ()),
     "freebuff": ("FB", ()),
+    "cline": ("CL", ()),
 }
 
 
@@ -1049,16 +1287,12 @@ def run_tui(stdscr, herdr_bin: str, poll_period: float, stale_after: float,
     row_map: dict = {}
     half = 0
     focus_buf = ""
-    cols, herdr_ok = [], None
+    cols: list = []
+    herdr_ok: bool | None = None
     while True:
         now = time.time()
         if now - last_poll >= poll_period:
-            agents, tabs = herdr_agents(herdr_bin)
-            herdr_ok = agents is not None
-            cards = load_cards()
-            sweep(cards, agents)
-            cols = build_columns(agents, cards, now, stale_after,
-                                 procs=scan_procs(), tabs=tabs)
+            cols, herdr_ok = gather_columns(herdr_bin, now, stale_after)
             last_poll = now
 
         h, w = stdscr.getmaxyx()
@@ -1185,12 +1419,8 @@ def run_serve(herdr_bin: str, poll_period: float, stale_after: float, frame_path
         run_serve("herdr", 2.0, 600.0, FRAME_PATH)
     """
     while True:
-        agents, tabs = herdr_agents(herdr_bin)
-        cards = load_cards()
-        sweep(cards, agents)
-        cols = build_columns(agents, cards, time.time(), stale_after,
-                             procs=scan_procs(), tabs=tabs)
-        frame = render_frame(cols, herdr_ok=agents is not None, color=False)
+        cols, herdr_ok = gather_columns(herdr_bin, time.time(), stale_after)
+        frame = render_frame(cols, herdr_ok=herdr_ok, color=False)
         tmp = frame_path + ".tmp"
         with open(tmp, "w") as f:
             f.write(frame + "\n")
@@ -1341,17 +1571,14 @@ class _ColoredParser(argparse.ArgumentParser):
         return colorize_help(super().format_usage())
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Parse arguments and dispatch: TUI, one-shot frame, note posting, or service loop.
+def build_parser() -> argparse.ArgumentParser:
+    """Build the agent_board argument parser: options plus note/serve subcommands.
 
-    usage: main [ARGV]
-    returns: Process exit code: 0 on success, 2 on a missing -m/--msg.
-
-    Args:
-        argv (list, optional): Command-line arguments; None uses sys.argv[1:]. Defaults to None.
+    Returns:
+        The configured parser (colored help, all flags and subcommands).
 
     Example:
-        sys.exit(main(["note", "step", "-m", "todo 2/5"]))
+        args = build_parser().parse_args(["--once"])
     """
     ap = _ColoredParser(
         prog="agent_board", description=__doc__, epilog=HELP_EPILOG,
@@ -1364,8 +1591,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--compact", action="store_true",
                     help="compact layout: one line per agent, two columns")
     ap.add_argument("--poll-period", "--autorefresh", dest="poll_period",
-                    type=float, default=2.0, metavar="SECONDS",
-                    help="snapshot poll / frame autorefresh period (s)")
+                    type=float, default=30.0, metavar="SECONDS",
+                    help="snapshot poll / frame autorefresh period (s, "
+                         "default 30; minimum 1)")
     ap.add_argument("--stale-seconds", type=float, default=600,
                     metavar="SECONDS",
                     help="external card age before 'stale' (s)")
@@ -1400,9 +1628,24 @@ def main(argv: list[str] | None = None) -> int:
         "serve", formatter_class=argparse.RawDescriptionHelpFormatter,
         help="headless loop: keep the board frame file fresh (service mode)",
         description="Headless loop for the systemd service: re-renders the "
-                    "board to ~/.local/state/agent-board/board.txt every "
-                    "--poll-period seconds (minimum 1).")
-    ns = ap.parse_args(argv)
+                    "board to ~/.local/state/agent_board/board.txt every "
+                    "--poll-period seconds (default 30, minimum 1).")
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Parse arguments and dispatch to the TUI, frame, note, or service path.
+
+    Args:
+        argv: Command-line arguments; None uses sys.argv[1:].
+
+    Returns:
+        Process exit code: 0 on success, 2 on a missing -m/--msg.
+
+    Example:
+        sys.exit(main(["note", "step", "-m", "todo 2/5"]))
+    """
+    ns = build_parser().parse_args(argv)
 
     if ns.cmd == "note":
         return cmd_note(ns, ns.herdr_bin)
@@ -1412,13 +1655,10 @@ def main(argv: list[str] | None = None) -> int:
                   max(1.0, ns.poll_period), ns.stale_seconds, FRAME_PATH)
         return 0
     herdr_bin = shutil.which(ns.herdr_bin) or ns.herdr_bin
-    agents, tabs = herdr_agents(herdr_bin)
-    cards = load_cards()
-    sweep(cards, agents)
-    cols = build_columns(agents, cards, time.time(), ns.stale_seconds,
-                         procs=scan_procs(), tabs=tabs)
     if ns.once:
-        render_once(cols, herdr_ok=agents is not None, compact=ns.compact)
+        cols, herdr_ok = gather_columns(herdr_bin, time.time(),
+                                        ns.stale_seconds)
+        render_once(cols, herdr_ok=herdr_ok, compact=ns.compact)
         return 0
     curses.wrapper(run_tui, herdr_bin,
                    max(1.0, ns.poll_period), ns.stale_seconds, ns.compact)
