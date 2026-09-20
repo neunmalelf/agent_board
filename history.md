@@ -6,6 +6,33 @@
 > alternatives. Rules: see `.agentrules` (History Rule) and
 > `docs/development.md`.
 
+## 2.6.20260920141919Z - 2026-09-20
+
+Follow-up to 2.5, requested right after it: once every agent pane gets a
+column, the board got cluttered because each column repeated up to four
+`· [hh:mm] step: ...` lines - the agents' step-by-step process. The step
+trail is now opt-in:
+
+- `trail=False` by default in `column_lines()`, `render_frame()`,
+  `render_once()`, `run_tui()`, and `run_serve()`: head rule, meta line
+  (agent/tab/pid/mem/age), current status line, closing rule.
+- New `--trail` flag re-enables the last four log entries for the TUI,
+  `--once`, and `serve` (`agent_board.py --trail`, `agent_board.py --trail
+  --once`, `agent_board.py --trail serve`).
+- Cards keep the full log (24 entries, `MAX_LOG`), so nothing is lost: the
+  steps are still on disk for inspection, only the screen is quiet.
+- Tests 63 → 65; README (Columns bullet, run commands, serve example),
+  `man/agent_board.1`, `tldr/agent_board.md`, `NEWS.md`, `ChangeLog.md`.
+
+Rejected alternatives:
+
+- Dropping the log from the cards: the trail is the agents' audit trail and
+  the `note step` contract depends on it; only rendering should stay quiet.
+- Also hiding the meta line (pid/mem/tab): one line per column, and it
+  answers "which tab and process", not "what did the agent think".
+- Hiding the status line too: the board exists to show what an agent is
+  doing right now, so the current line stays.
+
 ## 2.5.20260920140934Z - 2026-09-20
 
 Board fixes requested against the live session (6 tabs, 20 panes):

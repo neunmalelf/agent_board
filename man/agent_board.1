@@ -33,6 +33,11 @@ Render one frame and exit (no curses).
 .B \-\-compact
 Compact layout: one line per agent, two columns.
 .TP
+.B \-\-trail
+Also show each agent's step trail (last entries of its posted log). Off by
+default: a column renders only its current status line, so the board stays
+compact.
+.TP
 .B \-\-poll\-period, \-\-autorefresh \fISECONDS\fR
 Snapshot poll / frame autorefresh period (default: 30, minimum: 1).
 .TP

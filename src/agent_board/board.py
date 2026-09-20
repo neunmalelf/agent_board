@@ -39,7 +39,7 @@ import sys
 import time
 from datetime import datetime
 
-__version__ = "2.5.20260920140934Z"
+__version__ = "2.6.20260920141919Z"
 
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
@@ -1057,18 +1057,21 @@ def compact_line(col: dict, width: int) -> str:
 
 
 def render_frame(cols: list, herdr_ok: bool, color: bool,
-                 compact: bool = False, width: int = 118) -> str:
+                 compact: bool = False, width: int = 118,
+                 trail: bool = False) -> str:
     """Render the whole board as a text frame.
 
-    usage: render_frame <COLS> <HERDR_OK> <COLOR> [COMPACT] [WIDTH]
-    returns: The frame text: a header line plus one block per agent (or compact rows).
-
     Args:
-        cols (list): Column dicts from build_columns().
-        herdr_ok (bool): False appends "herdr snapshot unreachable" to the header.
-        color (bool): When True, segments are wrapped in ANSI color escapes.
-        compact (bool, optional): One line per agent in two columns. Defaults to False.
-        width (int, optional): Frame width in columns. Defaults to 118.
+        cols: Column dicts from build_columns().
+        herdr_ok: False appends "herdr snapshot unreachable" to the header.
+        color: When True, segments are wrapped in ANSI color escapes.
+        compact: One line per agent in two columns.
+        width: Frame width in columns.
+        trail: Also print each column's last four step entries; off by
+            default so the frame stays on the current status line.
+
+    Returns:
+        The frame text: a header line plus one block per agent (or compact rows).
 
     Example:
         print(render_frame(cols, herdr_ok=True, color=False, compact=True))
@@ -1099,7 +1102,7 @@ def render_frame(cols: list, herdr_ok: bool, color: bool,
         lines.append("│ " + meta_str(c))
         if c["text"]:
             lines.append("│ " + on(code, "● ") + c["text"])
-        for e in c["log"][-4:]:
+        for e in (c["log"][-4:] if trail else []):
             ts = time.strftime("%H:%M", time.localtime(e["t"]))
             lines.append(f"│   · [{ts}] {e['k']}: {e['m']}")
         lines.append("└")
@@ -1108,21 +1111,21 @@ def render_frame(cols: list, herdr_ok: bool, color: bool,
     return "\n".join(lines)
 
 
-def render_once(cols: list, herdr_ok: bool, compact: bool = False) -> None:
+def render_once(cols: list, herdr_ok: bool, compact: bool = False,
+                trail: bool = False) -> None:
     """Print one ANSI-colored frame to stdout (--once mode).
 
-    usage: render_once <COLS> <HERDR_OK> [COMPACT]
-    returns: None; the frame is printed to stdout in color.
-
     Args:
-        cols (list): Column dicts from build_columns().
-        herdr_ok (bool): False appends "herdr snapshot unreachable" to the header.
-        compact (bool, optional): One line per agent in two columns. Defaults to False.
+        cols: Column dicts from build_columns().
+        herdr_ok: False appends "herdr snapshot unreachable" to the header.
+        compact: One line per agent in two columns.
+        trail: Also print each column's step entries; off by default.
 
     Example:
         render_once(cols, herdr_ok=True, compact=True)
     """
-    print(render_frame(cols, herdr_ok, color=True, compact=compact))
+    print(render_frame(cols, herdr_ok, color=True, compact=compact,
+                       trail=trail))
 
 
 # --------------------------------------------------------------------------
@@ -1187,19 +1190,22 @@ def draw_parts(stdscr, y: int, x: int, parts: list[tuple[str, str | None]],
     return x
 
 
-def column_lines(col: dict, width: int, num: int = 0) -> list[list[tuple[str, str | None]]]:
+def column_lines(col: dict, width: int, num: int = 0,
+                 trail: bool = False) -> list[list[tuple[str, str | None]]]:
     """Pre-render one column as rows of (text, kind) segments for the TUI.
 
-    usage: column_lines <COL> <WIDTH> [NUM]
-    returns: Rows: rule head (number, "┌─", chip, tab, badge, header segments
-        on ONE row), meta line, optional status and trail lines, closing "└".
+    Args:
+        col: Column dict to render.
+        width: Rightmost column; head segments are truncated there.
+        num: 1-based column number shown in the rule.
+        trail: Also append the last four step entries of the column; off by
+            default so the column stays on the current status line.
+
+    Returns:
+        Rows: rule head (number, "┌─", chip, tab, badge, header segments on
+        ONE row), meta line, optional status and trail lines, closing "└".
         Kinds are draw_parts()/accent_attr() keys; the consumer supplies the
         chip color.
-
-    Args:
-        col (dict): Column dict to render.
-        width (int): Rightmost column; head segments are truncated there.
-        num (int, optional): 1-based column number shown in the rule. Defaults to 0.
 
     Example:
         block = column_lines(cols[0], 80, num=1)
@@ -1217,7 +1223,7 @@ def column_lines(col: dict, width: int, num: int = 0) -> list[list[tuple[str, st
     rows.append([("│ " + meta_str(col), "meta")])
     if col["text"]:
         rows.append([("│ ● " + col["text"], "text")])
-    for e in col["log"][-4:]:
+    for e in (col["log"][-4:] if trail else []):
         ts = time.strftime("%H:%M", time.localtime(e["t"]))
         rows.append([(f"│   · [{ts}] {e['k']}: {e['m']}", "trail")])
     rows.append([("└", "meta")])
@@ -1252,21 +1258,20 @@ def column_at_click(row_map: dict, my: int, mx: int, compact: bool, half: int) -
 
 
 def run_tui(stdscr, herdr_bin: str, poll_period: float, stale_after: float,
-            compact: bool = False) -> None:
+            compact: bool = False, trail: bool = False) -> None:
     """Fullscreen curses board loop: poll, render, and handle keys/mouse.
-
-    usage: run_tui <STDSCR> <HERDR_BIN> <POLL_PERIOD> <STALE_AFTER> [COMPACT]
-    returns: None when the user quits with q/Q; runs until then.
 
     Args:
         stdscr: curses standard screen handed over by curses.wrapper().
-        herdr_bin (str): herdr binary for snapshots and tab focus.
-        poll_period (float): Seconds between snapshot/card refreshes.
-        stale_after (float): External card age in seconds before the "stale" chip.
-        compact (bool, optional): One line per agent in two columns. Defaults to False.
+        herdr_bin: herdr binary for snapshots and tab focus.
+        poll_period: Seconds between snapshot/card refreshes.
+        stale_after: External card age in seconds before the "stale" chip.
+        compact: One line per agent in two columns.
+        trail: Also draw each column's step entries; off by default so the
+            board stays on the current status lines.
 
     Example:
-        curses.wrapper(run_tui, "herdr", 2.0, 600.0, False)
+        curses.wrapper(run_tui, "herdr", 30.0, 600.0, False)
     """
     curses.curs_set(0)
     curses.start_color()
@@ -1299,7 +1304,7 @@ def run_tui(stdscr, herdr_bin: str, poll_period: float, stale_after: float,
         if compact:
             total = (len(cols) + 1) // 2
         else:
-            blocks = [column_lines(c, w, num=i + 1)
+            blocks = [column_lines(c, w, num=i + 1, trail=trail)
                       for i, c in enumerate(cols)]
             total = sum(len(b) + 1 for b in blocks)
         offset = max(0, min(offset, total - (h - 4)))
@@ -1403,24 +1408,24 @@ def run_tui(stdscr, herdr_bin: str, poll_period: float, stale_after: float,
             continue
 
 
-def run_serve(herdr_bin: str, poll_period: float, stale_after: float, frame_path: str) -> None:
+def run_serve(herdr_bin: str, poll_period: float, stale_after: float,
+              frame_path: str, trail: bool = False) -> None:
     """Headless loop for the systemd service: keep the frame file fresh.
 
-    usage: run_serve <HERDR_BIN> <POLL_PERIOD> <STALE_AFTER> <FRAME_PATH>
-    returns: None; this loop never exits.
-
     Args:
-        herdr_bin (str): herdr binary for the liveness snapshot.
-        poll_period (float): Seconds between frame re-renders (minimum 1, enforced by main()).
-        stale_after (float): External card age in seconds before the "stale" chip.
-        frame_path (str): Path of the frame file rewritten atomically each cycle.
+        herdr_bin: herdr binary for the liveness snapshot.
+        poll_period: Seconds between frame re-renders (minimum 1, enforced
+            by main()).
+        stale_after: External card age in seconds before the "stale" chip.
+        frame_path: Path of the frame file rewritten atomically each cycle.
+        trail: Also write each column's step entries; off by default.
 
     Example:
-        run_serve("herdr", 2.0, 600.0, FRAME_PATH)
+        run_serve("herdr", 30.0, 600.0, FRAME_PATH)
     """
     while True:
         cols, herdr_ok = gather_columns(herdr_bin, time.time(), stale_after)
-        frame = render_frame(cols, herdr_ok=herdr_ok, color=False)
+        frame = render_frame(cols, herdr_ok=herdr_ok, color=False, trail=trail)
         tmp = frame_path + ".tmp"
         with open(tmp, "w") as f:
             f.write(frame + "\n")
@@ -1432,6 +1437,7 @@ def run_serve(herdr_bin: str, poll_period: float, stale_after: float, frame_path
 
 HELP_EPILOG = """examples:
   agent_board.py                             fullscreen TUI (q quits, j/k scrolls)
+  agent_board.py --trail                      TUI including the step trails
   agent_board.py --once                       print a single frame (for `watch`)
   agent_board.py --compact --once             one line per agent, two columns
   agent_board.py note register -m "goal"      open your column
@@ -1590,6 +1596,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="render one frame and exit (no curses)")
     ap.add_argument("--compact", action="store_true",
                     help="compact layout: one line per agent, two columns")
+    ap.add_argument("--trail", action="store_true",
+                    help="also show each agent's step trail (off: status line only)")
     ap.add_argument("--poll-period", "--autorefresh", dest="poll_period",
                     type=float, default=30.0, metavar="SECONDS",
                     help="snapshot poll / frame autorefresh period (s, "
@@ -1652,16 +1660,18 @@ def main(argv: list[str] | None = None) -> int:
 
     if ns.cmd == "serve":
         run_serve(shutil.which(ns.herdr_bin) or ns.herdr_bin,
-                  max(1.0, ns.poll_period), ns.stale_seconds, FRAME_PATH)
+                  max(1.0, ns.poll_period), ns.stale_seconds, FRAME_PATH,
+                  ns.trail)
         return 0
     herdr_bin = shutil.which(ns.herdr_bin) or ns.herdr_bin
     if ns.once:
         cols, herdr_ok = gather_columns(herdr_bin, time.time(),
                                         ns.stale_seconds)
-        render_once(cols, herdr_ok=herdr_ok, compact=ns.compact)
+        render_once(cols, herdr_ok=herdr_ok, compact=ns.compact, trail=ns.trail)
         return 0
     curses.wrapper(run_tui, herdr_bin,
-                   max(1.0, ns.poll_period), ns.stale_seconds, ns.compact)
+                   max(1.0, ns.poll_period), ns.stale_seconds, ns.compact,
+                   ns.trail)
     return 0
 
 

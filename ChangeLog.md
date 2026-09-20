@@ -5,6 +5,21 @@ All notable changes, newest first. Versions are
 `src/agent_board/` `__version__`). Detailed reasoning, decisions, and
 release notes live in `history.md`; user-facing highlights in `NEWS.md`.
 
+## 2.6.20260920141919Z - 2026-09-20
+
+- Step trails are opt-in: `column_lines()`, `render_frame()`,
+  `render_once()`, `run_tui()`, and `run_serve()` take `trail=False` by
+  default, so a column renders head, meta line, current status line, and
+  the closing rule; new `--trail` flag (TUI, `--once`, `serve` =
+  `agent_board.py --trail serve`) re-enables the last four
+  `· [hh:mm] k: m` entries. Cards keep the full log (`MAX_LOG` 24).
+- README "Text + trail" bullet and run-command block, `tldr/agent_board.md`
+  Notes, and `man/agent_board.1` (new `--trail` entry) document the flag.
+  README serve example fixed to `agent_board.py --poll-period 2 serve`
+  (top-level options must precede the subcommand).
+- Tests 63 → 65 (trail hidden by default in columns and frames, shown with
+  `trail=True`; parser default asserts `trail` off).
+
 ## 2.5.20260920140934Z - 2026-09-20
 
 - Refresh default 2 s → 30 s for every mode (`--poll-period` /

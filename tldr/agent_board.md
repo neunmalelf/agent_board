@@ -49,6 +49,8 @@ journalctl --user -u agent_board -f
   Tabs without any agent show as `? unknown`.
 - Refresh (TUI, `--once`, service frame) defaults to 30 s:
   `--poll-period` / `--autorefresh SECONDS` overrides it (minimum 1).
+- Columns show the current status line only; `--trail` adds each agent's
+  last step entries (the posted steps stay in the card either way).
 - Every refresh re-reads the snapshot and drops the columns whose pane or
   tab is gone.
 - Status chips: `● working`, `❯ needs input`, `■ stopped`, `blocked`,

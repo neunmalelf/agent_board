@@ -3,6 +3,14 @@
 User-visible highlights per release. Full details: `ChangeLog.md`;
 decisions and reasoning: `history.md` (newest on top).
 
+## 2.6 (2026-09-20)
+
+- **Quieter board**: a column now shows its current status line only - the
+  step trail (`· [hh:mm] step: ...`, the agent's step-by-step process) is
+  gone from the screen, so a board with many agents stays readable.
+  `--trail` brings it back; the posted steps stay in the status card either
+  way. Applies to the fullscreen TUI, `--once`, and the service frame.
+
 ## 2.5 (2026-09-20)
 
 - **30 s refresh by default**: the fullscreen TUI, `--once`, and the

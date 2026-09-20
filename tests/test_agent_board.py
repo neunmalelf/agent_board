@@ -868,19 +868,25 @@ def test_cline_badge_symbol_and_agent_aliases():
 def test_column_lines_header_on_one_row():
     """column_lines renders the whole rule head on a single row.
 
-    usage: test_column_lines_header_on_one_row
-    returns: None.
-
-    Example:
-        test_column_lines_header_on_one_row()
+    The step trail is opt-in, so the default block ends after the status line.
     """
-    block = mod.column_lines(col(chip="idle", text="a", age=1,
-                                 log=[{"t": 1000.0, "k": "step", "m": "todo"}]),
-                             80, num=4)
+    c = col(chip="idle", text="a", age=1,
+            log=[{"t": 1000.0, "k": "step", "m": "todo"}])
+    block = mod.column_lines(c, 80, num=4)
     assert "".join(t for t, _ in block[0]) == "4 ┌─ (○ idle) (tab) π Title"
-    assert len(block) == 5  # head, meta, text, trail, └
+    assert len(block) == 4  # head, meta, text, └
     assert block[1] == [("│ omp · w1:t1 · updated 1s", "meta")]
-    assert block[3][0][1] == "trail" and block[3][0][0].endswith("step: todo")
+    assert not any(k == "trail" for row in block for _, k in row)
+
+
+def test_column_lines_trail_is_opt_in():
+    """column_lines draws the step trail only when trail=True is passed."""
+    c = col(chip="idle", text="a", age=1,
+            log=[{"t": 1000.0, "k": "step", "m": "todo"}])
+    block = mod.column_lines(c, 80, num=4, trail=True)
+    assert len(block) == 5  # head, meta, text, trail, └
+    assert block[3][0][1] == "trail"
+    assert block[3][0][0].endswith("step: todo")
 
 
 def test_column_lines_truncates_head_to_width():
@@ -911,6 +917,17 @@ def test_compact_line_segments_and_width():
     wide = col(header="x" * 100)
     assert mod.compact_line(wide, 20) == \
         mod.compact_line(wide, 20)[:20]
+
+
+def test_render_frame_trail_is_opt_in():
+    """render_frame hides the step trail unless trail=True is passed."""
+    c = col(chip="working", text="editing board.py",
+            log=[{"t": 1000.0, "k": "step", "m": "todo 2/5"}])
+    plain = mod.render_frame([c], herdr_ok=True, color=False)
+    assert "● editing board.py" in plain
+    assert "todo 2/5" not in plain
+    with_trail = mod.render_frame([c], herdr_ok=True, color=False, trail=True)
+    assert "· [" in with_trail and "step: todo 2/5" in with_trail
 
 
 def test_render_frame_plain_and_active_count():
@@ -1153,6 +1170,8 @@ def test_build_parser_default_refresh_is_30s():
     assert ap.parse_args(["--autorefresh", "5"]).poll_period == 5.0
     assert ap.parse_args(["--poll-period", "2"]).poll_period == 2.0
     assert ap.parse_args(["serve"]).cmd == "serve"
+    assert ap.parse_args([]).trail is False       # step trails stay hidden
+    assert ap.parse_args(["--trail"]).trail is True
 
 
 def test_wrapper_help():

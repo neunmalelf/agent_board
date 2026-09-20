@@ -53,13 +53,14 @@ agent_board view        # foreground fullscreen TUI (autorefresh 30 s)
 agent_board view --autorefresh 10   # TUI, refresh every 10 s
 agent_board view-compact            # one line per agent, two columns
 agent_board view-compact --autorefresh 10   # compact, refresh every 10 s
+agent_board.py --trail              # TUI including each agent's step trail
 agent_board logs [n]    # last n journal lines of the service
 ```
 
 `agent_board start` runs the board as a systemd user service
 (`agent_board.service` → `agent_board.py serve`): every 30 s it re-renders
-the board to `~/.local/state/agent_board/board.txt` (`agent_board.py serve
---poll-period 2` for a livelier frame file). `agent_board status` prints the
+the board to `~/.local/state/agent_board/board.txt` (`agent_board.py
+--poll-period 2 serve` for a livelier frame file). `agent_board status` prints the
 service state and that frame, so the board is readable anywhere (including
 `watch -c "cat ~/.local/state/agent_board/board.txt"`).
 For the interactive fullscreen TUI run `agent_board.py` or `agent_board view`
@@ -111,8 +112,9 @@ Each live agent gets one column:
 - **pid + mem** - resolved per agent from `/proc` (herdr's snapshot carries
   no pid): matched by agent-kind alias + cwd, external cards by their pts
   tty.
-- **Text + trail** - what the agent posted: current line plus its last
-  steps with timestamps.
+- **Text + trail** - what the agent posted: the current status line, plus
+  (with `--trail`) its last steps with timestamps. Step trails are hidden
+  by default so the board stays on the status lines.
 - **Removal**: before every refresh the snapshot is re-read; a column
   disappears as soon as its pane is gone, and a herdr-owned card is swept
   once neither its pane nor its tab exists any more (a card whose pane
