@@ -3,6 +3,15 @@
 User-visible highlights per release. Full details: `ChangeLog.md`;
 decisions and reasoning: `history.md` (newest on top).
 
+## 2.10 (2026-09-20)
+
+**First tagged release.** It rolls up everything from 2.5 to 2.9 below (30 s
+refresh default, one column per agent with the process-tree pane probe,
+opt-in step trails, clean Ctrl+C, columns grouped by herdr tab) and adds no
+further functional change - the version carries a new timestamp stamp only.
+From here on, each release gets a git tag named after the full version and a
+GitHub release whose notes are the latest `history.md` entry.
+
 ## 2.9 (2026-09-20)
 
 - **One tab, one block**: the agents of a herdr tab now sit next to each

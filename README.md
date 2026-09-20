@@ -244,8 +244,10 @@ Versioning: `Major.Minor.YYYYMMDDhhmmssZ` (UTC timestamp stamp). The stamp
 lives in `src/agent_board/board.py __version__`; `pyproject.toml [project]
 version` carries the same stamp without the trailing `Z` (PEP 440 does not
 allow the Z) - kept in sync by `./_check_version`. Every helper script
-carries its own stamp. Project
-history is kept in `history.md` (newest entry on top, doubles as release
+carries its own stamp. Released versions are tagged with that full version
+string (never a bare `v2.10`) and published as GitHub releases whose notes
+are the latest `history.md` entry. Project history is kept in `history.md`
+(newest entry on top, doubles as release
 notes) with working archives under `history/`; the rules are documented in
 `.agentrules` and `docs/development.md`. `AGENTS.md` is the entry file for
 coding agents.

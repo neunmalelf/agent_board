@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "agent-board"
 # PEP 440 forbids the trailing "Z" of the workspace stamp convention, so the
 # packaging version carries the bare timestamp; module __version__ keeps the Z.
-version = "2.9.20260920145912"
+version = "2.10.20260920155622"
 description = "agent_board - live status board for coding agents, plus the agent-watch notification daemon"
 readme = "README.md"
 requires-python = ">=3.13"

@@ -5,6 +5,18 @@ All notable changes, newest first. Versions are
 `src/agent_board/` `__version__`). Detailed reasoning, decisions, and
 release notes live in `history.md`; user-facing highlights in `NEWS.md`.
 
+## 2.10.20260920155622Z - 2026-09-20
+
+- Release stamp, no code change: `pyproject.toml` and
+  `src/agent_board/board.py` move 2.9 -> 2.10, `src/agent_board/watch.py`
+  1.3 -> 1.4, all at `20260920155622Z`. Helper `__VERSION__` stamps unchanged.
+- First tagged release: the 2.5 to 2.9 commits are pushed, tagged
+  `2.10.20260920155622Z`, and published as a GitHub release whose notes are
+  the matching `history.md` entry. `docs/development.md` gains the release
+  procedure, README the tag/release sentence in its versioning note.
+- `view-compact.jpg` restored in the working tree before the commit (the
+  README live-board section embeds it).
+
 ## 2.9.20260920145912Z - 2026-09-20
 
 - Columns are grouped by herdr tab: `build_columns()` collects the columns per

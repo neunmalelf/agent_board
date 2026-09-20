@@ -40,6 +40,27 @@ stamp lives in `pyproject.toml [project] version` and in
 timestamp. Every helper script carries its own `__VERSION__` stamp. Bump on
 every material change, before the commit (see history rules).
 
+## Releases
+
+A release is a version stamp without a functional change; it publishes the
+changes committed since the previous tag (each of them already stamped).
+
+```sh
+V=$(timestamp | tr -d Z)          # fresh stamp, e.g. 20260920155622
+# bump pyproject.toml / board.py (Major.Minor.$V) and watch.py (own Major.Minor)
+# write the history.md entry first - it becomes the release notes - then NEWS.md
+./_tests && ./_check_version
+git commit -m "2.10.${V}Z: <one-line summary>"
+git tag -a "2.10.${V}Z" -m "<release summary>"
+git push origin master --follow-tags
+gh release create "2.10.${V}Z" --title "2.10.${V}Z" --notes-file <history.md entry>
+```
+
+The tag is the full version string, never a bare `v2.10`, so tag, packaging
+metadata, and `__version__` stay identical; the release notes are the latest
+`history.md` entry (History Rule). Helper scripts only get a new
+`__VERSION__` when the script itself changed.
+
 ## History rules
 
 1. `history.md` (repo root) is the release log: newest entry on top, one

@@ -6,6 +6,52 @@
 > alternatives. Rules: see `.agentrules` (History Rule) and
 > `docs/development.md`.
 
+## 2.10.20260920155622Z - 2026-09-20
+
+First tagged release. The 2.5 to 2.9 changes were committed but never pushed,
+and the repository had neither a git tag nor a GitHub release. This stamp
+rolls them up, pushes them, and tags the result.
+
+- Version stamps bumped for the release point: `pyproject.toml` and
+  `src/agent_board/board.py` move 2.9 -> 2.10, `src/agent_board/watch.py`
+  1.3 -> 1.4, all timestamped `20260920155622Z`. No code change: the release
+  commit carries the stamps, this entry, and the two docs below.
+- Release: annotated tag `2.10.20260920155622Z`, pushed with `master`, plus
+  `gh release create` on that tag with this entry as the `--notes-file` (per
+  the History Rule the latest entry doubles as the release notes).
+- `view-compact.jpg` was deleted in the working tree but is still embedded by
+  the README live-board section (`![agent_board view-compact, two columns]`).
+  It was restored (`git checkout -- view-compact.jpg`) before the release, so
+  the published README keeps its compact screenshot.
+- Helper scripts are unchanged, so their `__VERSION__` stamps stay at
+  `1.0.20260913092333Z` (`hooks/install.sh` at `1.3.20260909162500Z`).
+
+Verified: `./_tests` green (83 passed, `ruff check src tests` clean,
+`mypy src/agent_board` clean), `./_check_version` reports
+`pyproject 2.10.20260920155622 = board 2.10.20260920155622Z, watch
+1.4.20260920155622Z`, and both `agent_board.py --version` and
+`./agent_board --version` print the new stamp.
+
+Decision - release vehicle: a git tag plus a GitHub release, not a push-only
+release, so the version is addressable and the notes are attached to it.
+
+Rejected alternatives:
+
+- A bare `v2.10` tag: it would no longer match `pyproject.toml` and
+  `__version__`, which carry the timestamp stamp. The tag is therefore the
+  full version string.
+- Squashing 2.5 to 2.9 into one release commit: each of those commits is the
+  change it describes and carries its own stamp; the History Rule wants one
+  entry per version bump, and rewriting pushed-adjacent history buys nothing.
+- Tag without release notes: `gh release create` with the existing entry
+  costs one call and leaves the notes readable on GitHub.
+
+Rolled up by this release: 2.5 (30 s refresh, one column per agent pane,
+tab-liveness sweep), 2.6 (step trails opt-in via `--trail`), 2.7
+(process-tree pane probe, one column per agent kind), 2.8 (clean Ctrl+C in
+TUI/serve/frame), 2.9 (columns grouped by herdr tab). User-facing
+highlights: `NEWS.md`; the per-change detail stays in the entries below.
+
 ## 2.9.20260920145912Z - 2026-09-20
 
 Requested from the board: "agents in the same tab should be sorted after each
