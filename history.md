@@ -6,6 +6,48 @@
 > alternatives. Rules: see `.agentrules` (History Rule) and
 > `docs/development.md`.
 
+## 2.9.20260920145912Z - 2026-09-20
+
+Requested from the board: "agents in the same tab should be sorted after each
+other". Reproduced in the live 2.8 frame - the `earth` tab's two agents were
+rendered at positions 3 and 7 of the compact view, interleaved with
+`media_downloader`, `quizza_app`, `1_ddpico` and `admin1`, because
+`build_columns()` sorted all columns by chip priority alone.
+
+Fix: `build_columns()` now groups first, then sorts.
+
+- Columns are collected per tab (`by_tab`), each group is sorted with the new
+  `column_sort_key()` (chip priority, then card age - the key that the flat
+  sort used inline before), and the groups are sorted by their first member,
+  i.e. by the tab's most urgent column. The result is flattened
+  group by group.
+- Because the groups themselves are ordered by their best column, the board
+  keeps its attention order at tab level (`working` tab first, `done` tab
+  last) and stays contiguous inside every tab, even when two tabs have
+  identical rank tuples - a `(rank, key)` sort key could not guarantee that,
+  since two tabs with the same rank would interleave. This is why the group
+  list is sorted and flattened instead of encoding the tab in the key.
+- A column without a tab (`ext-*` agents outside herdr) forms its own group
+  and therefore keeps its place in the flat status/age order instead of being
+  pulled into a tab block.
+- Effect on the live board: `1_ddpico` (working agy + idle omp), then `earth`
+  (probed cline + omp), then the two freebuff tabs, then the two `done` tabs.
+  In the compact view the pair of a tab now occupies adjacent rows.
+
+Tests 82 → 83; README gains an "Order" bullet, `tldr/agent_board.md` and
+`man/agent_board.1` name the grouping.
+
+Rejected alternatives:
+
+- Sorting by `(tab, status, age)`: tabs would be in tab-id order instead of
+  attention order, so a `done` tab could appear above a `working` one.
+- Sorting by `(status, age, tab)`: keeps a flat order and only breaks ties by
+  tab, so the two agents of one tab still end up apart.
+- Using the *lowest* chip rank of a tab as the group rank and putting the tab
+  id in the key: the key would only keep agents of the same tab together when
+  their rank tuples differ; equal tuples (two tabs with the same chip and the
+  same age) would interleave again.
+
 ## 2.8.20260920145442Z - 2026-09-20
 
 Reported from the board: pressing Ctrl+C in the fullscreen TUI printed

@@ -21,6 +21,9 @@ by process name and argv - so an agent started inside a wrapper such as
 agent kinds renders one column per kind.
 Columns are colored: green while working, yellow while
 waiting for input, red when stopped by a rate/quota limit, cyan when idle.
+Columns are grouped by herdr tab: the agents of one tab follow each other,
+the tab is placed by its most urgent column, and inside a tab the order is
+chip priority (working first, done last) and card age.
 .PP
 Run \fBagent_board\fR (the wrapper) for the fullscreen TUI and service
 management; \fBagent_board.py \-\-once\fR prints a single frame.

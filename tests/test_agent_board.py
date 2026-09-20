@@ -811,6 +811,29 @@ def test_build_columns_sort_order():
         ["working", "input", "stopped", "blocked", "idle", "done"]
 
 
+def test_build_columns_groups_agents_of_one_tab():
+    """Agents of one tab are adjacent; the tab sorts by its urgent column."""
+    agents = [{"pane_id": "p1", "tab_id": "t1", "agent": "omp",
+               "agent_status": "working", "cwd": ""},
+              {"pane_id": "p2", "tab_id": "t2", "agent": "omp",
+               "agent_status": "input", "cwd": ""},
+              {"pane_id": "p3", "tab_id": "t1", "agent": "cline",
+               "agent_status": "idle", "cwd": ""},
+              {"pane_id": "p4", "tab_id": "t2", "agent": "cline",
+               "agent_status": "done", "cwd": ""}]
+    tabs = [{"tab_id": "t1", "label": "earth"},
+            {"tab_id": "t2", "label": "quizza"}]
+    cols = mod.build_columns(agents, {}, 1000.0, 600, tabs=tabs)
+    assert [(c["tab"], c["chip"]) for c in cols] == [
+        ("t1", "working"), ("t1", "idle"), ("t2", "input"), ("t2", "done")]
+
+    # an external agent (no tab) keeps its own place between the tab groups
+    cards = {"ext-3": {"pane_id": "ext-3", "herdr": False, "input": True,
+                       "status": "A or B?", "updated": 999.0}}
+    cols = mod.build_columns(agents, cards, 1000.0, 600, tabs=tabs)
+    assert [c["pane"] for c in cols] == ["p1", "p3", "ext-3", "p2", "p4"]
+
+
 def test_build_columns_shows_second_agent_in_same_tab():
     """build_columns renders every agent pane of a tab, not only herdr's pick."""
     agents = [{"pane_id": "p1", "tab_id": "t1", "agent": "omp",

@@ -5,6 +5,22 @@ All notable changes, newest first. Versions are
 `src/agent_board/` `__version__`). Detailed reasoning, decisions, and
 release notes live in `history.md`; user-facing highlights in `NEWS.md`.
 
+## 2.9.20260920145912Z - 2026-09-20
+
+- Columns are grouped by herdr tab: `build_columns()` collects the columns per
+  tab, sorts inside a tab (`column_sort_key()`: chip priority, then card age)
+  and places each tab by its most urgent column, so the agents of one tab -
+  including its `(? unknown)` fallback and a second agent probed in the same
+  pane - follow each other in the TUI, `--once`, and the service frame.
+  A column without a tab (an agent outside herdr) keeps its own place in that
+  order instead of joining a group.
+- The compact layout benefits directly: the two agents of a tab now land in
+  adjacent numbered rows (previously they could sit in different halves).
+- README ("Order" bullet), `tldr/agent_board.md`, `man/agent_board.1`;
+  tests 82 → 83 (`test_build_columns_groups_agents_of_one_tab` asserts the
+  contiguous order, the tab placement by the most urgent column, and that an
+  `ext-*` column keeps its own place).
+
 ## 2.8.20260920145442Z - 2026-09-20
 
 - Ctrl+C in the fullscreen TUI no longer prints a `KeyboardInterrupt`

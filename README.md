@@ -113,6 +113,11 @@ Each live agent gets one column:
   `(? unknown)` by design. Processes outside the probed tree (for example
   an agent in the background of a pane) are not found by that probe; those
   agents show up when they post a card.
+- **Order** = the agents of one herdr tab stay together: the tab is placed by
+  its most urgent column, its columns then follow each other, and inside a
+  tab columns sort by chip priority (`working` first, `done` last) and card
+  age. A column without a tab (an agent outside herdr) keeps its own place in
+  that order instead of joining a group.
 - **pid + mem** - resolved per agent from `/proc` (herdr's snapshot carries
   no pid): matched by agent-kind alias + cwd, external cards by their pts
   tty.

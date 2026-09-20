@@ -42,7 +42,7 @@ import sys
 import time
 from datetime import datetime
 
-__version__ = "2.8.20260920145442Z"
+__version__ = "2.9.20260920145912Z"
 
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
@@ -858,6 +858,23 @@ def card_chip(card: dict, fallback: str) -> str:
 # viewer: merge snapshot + cards into columns
 # --------------------------------------------------------------------------
 
+def column_sort_key(col: dict) -> tuple:
+    """Sort key of one column: chip priority first, then card age.
+
+    Args:
+        col: Column dict with a "chip" and an "age".
+
+    Returns:
+        (status rank, age) tuple; a column without an age sorts behind the
+        aged ones of the same chip (the board knows no "newness" for it).
+
+    Example:
+        column_sort_key({"chip": "working", "age": 12.0})
+    """
+    age = col["age"] if col["age"] is not None else 1e12
+    return (STATUS_ORDER.get(str(col["chip"]), 9), age)
+
+
 def build_columns(agents: list | None, cards: dict, now: float, stale_after: float,
                   procs: tuple | None = None, tabs: list | None = None,
                   panes: list | None = None, pane_agents: dict | None = None) -> list:
@@ -880,7 +897,11 @@ def build_columns(agents: list | None, cards: dict, now: float, stale_after: flo
             detect_pane_agents() for the panes herdr did not classify.
 
     Returns:
-        Column dicts sorted by status priority, then card age.
+        Column dicts grouped by herdr tab: the agents of one tab follow each
+        other, the tab (and with it its columns) is placed by its most urgent
+        column, and inside a tab columns sort by status priority and then
+        card age. A column without a tab (an agent outside herdr) keeps its
+        own place in that order instead of joining a group.
 
     Example:
         cols = build_columns(agents, cards, time.time(), 600.0, tabs=tabs,
@@ -1000,9 +1021,25 @@ def build_columns(agents: list | None, cards: dict, now: float, stale_after: flo
             "pid": None, "rss": None,
         })
 
-    cols.sort(key=lambda c: (STATUS_ORDER.get(str(c["chip"]), 9),
-                             c["age"] if c["age"] is not None else 1e12))
-    return cols
+    # Agents of one herdr tab stay together: a tab (and with it all of its
+    # columns) is placed by its most urgent column, while the status/age order
+    # inside the tab is unchanged. A column without a tab (an agent outside
+    # herdr) keeps its own place instead of joining a group.
+    groups: list[list[dict]] = []
+    by_tab: dict = {}
+    for c in cols:
+        tab = str(c.get("tab") or "")
+        group = by_tab.get(tab) if tab else None
+        if group is None:
+            group = []
+            groups.append(group)
+            if tab:
+                by_tab[tab] = group
+        group.append(c)
+    for group in groups:
+        group.sort(key=column_sort_key)
+    groups.sort(key=lambda g: column_sort_key(g[0]))
+    return [c for group in groups for c in group]
 
 
 def sweep(cards: dict, agents: list | None, tabs: list | None = None,

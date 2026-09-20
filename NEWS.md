@@ -3,6 +3,14 @@
 User-visible highlights per release. Full details: `ChangeLog.md`;
 decisions and reasoning: `history.md` (newest on top).
 
+## 2.9 (2026-09-20)
+
+- **One tab, one block**: the agents of a herdr tab now sit next to each
+  other on the board instead of being scattered over it by status - a tab is
+  placed where its most urgent agent belongs, its agents follow in
+  `working` → `done` order (then by age), and an agent outside herdr keeps
+  its own line. In the compact layout the agents of a tab are adjacent rows.
+
 ## 2.8 (2026-09-20)
 
 - **Ctrl+C quits the board cleanly**: pressing Ctrl+C in the fullscreen TUI
