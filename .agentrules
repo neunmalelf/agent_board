@@ -63,10 +63,13 @@ deliberately (`SKIP_TESTS=1`) and never silently.
    and rejected alternatives (see the 2026-09-13 textual decision).
 
 ## Docstring Style
-`skills/python_comment_style` governs every Python function: typed
-signature, `usage:` line without types, `returns:`/`errors:` lines,
-Google-style `Args:`, executable `Example:`. Enforce it on new and changed
-functions.
+`docstrings-python` (`~/.agents/skills/docstrings-python/skill.md`) governs
+every Python function: PEP 257 summary in the imperative mood ending with a
+period, Google-style `Args:`/`Returns:`/`Raises:` sections, `Attributes:` on
+classes. Types live in the signature, never in the docstring prose. Enforce it
+on new and changed functions and strip the retired `python_comment_style`
+header (`usage:`/`returns:`/`errors:`) whenever you touch such a function.
+Check with `ruff check --select D` (configured in `pyproject.toml`).
 
 ## Line Endings
 LF everywhere; `.gitattributes` enforces `* text=auto eol=lf`. Never write

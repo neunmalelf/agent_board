@@ -22,7 +22,7 @@ The git pre-commit hook (`hooks/install.sh`) enforces the same checks.
 | Skill | Description | Load |
 |---|---|---|
 | `agent-board` | Teaches agents to post to the board: register at task start, post each step (esp. per todo item), update on change, done at end, input/quota when blocked. | always |
-| `python_comment_style` | Enforces the strict docstring/function-header format (typed signature, usage/returns/errors lines, Google-style Args, executable example) on every created or changed Python function. | always |
+| `docstrings-python` | PEP 257 + Google style for every created or changed Python docstring; supersedes the retired `python_comment_style` skill (deleted 2026-09-20). Enforced with `ruff check --select D`. | always |
 
 Skills live in `skills/`. The `agent-board` skill is also installed globally
 to `~/.agents/skills/agent-board` for agent-side posting (see README).
