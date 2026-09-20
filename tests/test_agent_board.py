@@ -409,31 +409,128 @@ def test_detect_pane_agents_skips_classified_panes(monkeypatch: pytest.MonkeyPat
     """detect_pane_agents probes only the panes herdr did not classify.
 
     Args:
-        monkeypatch: pytest fixture patching mod.pane_agent.
+        monkeypatch: pytest fixture patching mod.pane_agents.
     """
     calls: list = []
 
-    def fake_pane_agent(herdr_bin: str, pane: str) -> tuple:
-        """Record the probed pane and report a cline process.
+    def fake_pane_agents(herdr_bin: str, pane: str) -> list:
+        """Record the probed pane and report one cline process.
 
         Args:
             herdr_bin: Unused herdr binary name.
             pane: Pane id being probed.
 
         Returns:
-            A fixed (kind, pid, rss) triple.
+            A fixed single-entry probe result.
         """
         calls.append(pane)
-        return ("cline", 7, 128)
+        return [{"agent": "cline", "pid": 7, "rss": 128}]
 
-    monkeypatch.setattr(mod, "pane_agent", fake_pane_agent)
+    monkeypatch.setattr(mod, "pane_agents", fake_pane_agents)
     panes = [{"pane_id": "p1"}, {"pane_id": "p2"}, {"pane_id": ""}]
     found = mod.detect_pane_agents("herdr", panes, [{"pane_id": "p1"}])
     assert calls == ["p2"]
-    assert found == {"p2": {"agent": "cline", "pid": 7, "rss": 128}}
+    assert found == {"p2": [{"agent": "cline", "pid": 7, "rss": 128}]}
+
+
+def test_probe_entries_normalizes_probe_results():
+    """probe_entries accepts an entry list, a single entry, and junk."""
+    entry = {"agent": "omp", "pid": 5, "rss": 4096}
+    assert mod.probe_entries([entry]) == [entry]
+    assert mod.probe_entries(entry) == [entry]      # single entry, wrapped
+    assert mod.probe_entries(None) == [] and mod.probe_entries("x") == []
+    assert mod.probe_entries([entry, None]) == [entry]
 
 
 
+@pytest.mark.parametrize("proc,expected", [
+    ({"name": "omp", "argv": ["/home/fmann/.local/bin/omp", "--model", "x"]}, "omp"),
+    ({"name": "node-MainThread",
+      "argv": ["node", "/home/fmann/.nvm/versions/node/v26.8.1/bin/cline"]},
+     "cline"),
+    ({"name": "node-MainThread", "argv": ["node", "/usr/lib/cline.js"]}, "cline"),
+    ({"name": "agy", "argv": ["antigravity"]}, "agy"),
+    ({"name": "mc", "argv": ["/home/fmann/.local/opt/mc-ts/bin/mc", "-P",
+                             "/tmp/mc.pwd.X"]}, ""),
+    ({"name": "grep", "argv": ["grep", "cline.md"]}, ""),
+])
+def test_proc_kind_matches_name_and_argv(proc: dict, expected: str):
+    """proc_kind resolves wrapper/interpreter processes through their argv."""
+    assert mod.proc_kind(proc) == expected
+
+
+def test_proc_tree_walks_descendants_of_the_foreground_processes(
+        monkeypatch: pytest.MonkeyPatch):
+    """proc_tree reads the roots and their descendants, bounded by limit.
+
+    Args:
+        monkeypatch: pytest fixture patching the /proc readers.
+    """
+    children = {1: [2], 2: [3], 3: []}
+    procs = {1: {"name": "mc", "pid": 1, "argv": ["/opt/mc"]},
+             2: {"name": "bash", "pid": 2, "argv": ["/bin/bash"]},
+             3: {"name": "node-MainThread", "pid": 3,
+                 "argv": ["node", "/opt/bin/cline"]}}
+    monkeypatch.setattr(mod, "child_pids", lambda pid: children.get(pid, []))
+    monkeypatch.setattr(mod, "read_proc", lambda pid: procs.get(pid))
+    assert [p["pid"] for p in mod.proc_tree([1])] == [1, 2, 3]
+    assert [p["pid"] for p in mod.proc_tree([3])] == [3]
+    assert [p["pid"] for p in mod.proc_tree([1], limit=2)] == [1, 2]
+    assert mod.proc_tree([]) == [] and mod.proc_tree([99]) == []
+    assert mod.proc_tree(["x", None]) == []       # non-pids are ignored
+
+
+def test_proc_tree_reads_a_real_proc_entry():
+    """The /proc readers return this very process (name, pid, argv)."""
+    tree = mod.proc_tree([os.getpid()])
+    assert tree and tree[0]["pid"] == os.getpid()
+    assert tree[0]["name"] and tree[0]["argv"]
+    assert mod.read_proc(0) is None
+
+
+def test_pane_agents_finds_agent_nested_behind_a_wrapper(
+        monkeypatch: pytest.MonkeyPatch):
+    """A cline agent below a wrapper (mc) still yields that pane's column.
+
+    Args:
+        monkeypatch: pytest fixture patching the pane probe and /proc readers.
+    """
+    procs = [{"name": "mc", "pid": 10,
+              "argv": ["/home/fmann/.local/opt/mc-ts/bin/mc", "-P",
+                       "/tmp/mc.pwd.X"]}]
+    tree = procs + [{"name": "bash", "pid": 11, "argv": ["/bin/bash"]},
+                    {"name": "node-MainThread", "pid": 12,
+                     "argv": ["node", "/home/fmann/.nvm/bin/cline"]}]
+    monkeypatch.setattr(mod, "herdr_pane_processes", lambda b, p: procs)
+    monkeypatch.setattr(mod, "proc_tree", lambda pids: tree)
+    monkeypatch.setattr(mod, "pid_rss",
+                        lambda pid: {10: 20480, 12: 1966080}.get(pid))
+    assert mod.pane_agents("herdr", "w1:p68") == [
+        {"agent": "cline", "pid": 12, "rss": 1966080}]
+    assert mod.pane_agent("herdr", "w1:p68") == ("cline", 12, 1966080)
+    monkeypatch.setattr(mod, "herdr_pane_processes", lambda b, p: [])
+    assert mod.pane_agents("herdr", "w1:p68") == []
+    assert mod.pane_agent("herdr", "w1:p68") == ("", None, None)
+
+
+def test_pane_agents_keeps_one_entry_per_kind(monkeypatch: pytest.MonkeyPatch):
+    """A pane running two agents of one kind reports a single largest entry.
+
+    Args:
+        monkeypatch: pytest fixture patching the pane probe and /proc readers.
+    """
+    procs = [{"name": "node-MainThread", "pid": 1, "argv": ["node", "/b/cline"]},
+             {"name": "cline", "pid": 2, "argv": ["/b/cline"]},
+             {"name": "omp", "pid": 3, "argv": ["/b/omp"]}]
+    monkeypatch.setattr(mod, "herdr_pane_processes", lambda b, p: procs)
+    monkeypatch.setattr(mod, "proc_tree", lambda pids: [])
+    monkeypatch.setattr(mod, "pid_rss", lambda pid: {1: 10, 2: 30, 3: 20}[pid])
+    assert mod.pane_agents("herdr", "w1:p1") == [
+        {"agent": "cline", "pid": 2, "rss": 30},
+        {"agent": "omp", "pid": 3, "rss": 20}]
+
+
+def test_self_pane_id_prefers_env(monkeypatch: pytest.MonkeyPatch):
     """self_pane_id prefers HERDR_PANE_ID and falls back to an external tty id.
 
     usage: test_self_pane_id_prefers_env <MONKEYPATCH>
@@ -752,6 +849,52 @@ def test_build_columns_probes_pane_processes_and_keeps_tab_fallback():
     assert by_pane["t2"]["header"] == "quizza"  # no agent: fallback column
 
 
+def test_build_columns_lists_omp_and_nested_cline_of_one_tab():
+    """The live 'earth' shape: a classified omp pane plus a cline behind mc."""
+    agents = [{"pane_id": "p8", "tab_id": "t1", "agent": "omp",
+               "agent_status": "working", "cwd": "/earth"}]
+    panes = [{"pane_id": "p8", "tab_id": "t1", "cwd": "/earth",
+              "terminal_title_stripped": "π Optimize without changing"},
+             {"pane_id": "p6", "tab_id": "t1", "cwd": "/earth",
+              "agent_status": "unknown",
+              "terminal_title_stripped": "> - set the default also to 30s"}]
+    tabs = [{"tab_id": "t1", "label": "earth"}]
+    cols = mod.build_columns(agents, {}, 1000.0, 600, tabs=tabs, panes=panes,
+                             pane_agents={"p6": [{"agent": "cline", "pid": 12,
+                                                  "rss": 1966080}]})
+    by_pane = {c["pane"]: c for c in cols}
+    assert set(by_pane) == {"p8", "p6"}
+    assert by_pane["p8"]["agent"] == "omp" and by_pane["p8"]["chip"] == "working"
+    assert by_pane["p6"]["agent"] == "cline"      # probed behind the mc wrapper
+    assert by_pane["p6"]["tab_name"] == "earth"
+    assert by_pane["p6"]["pid"] == 12
+    assert "CL" in mod.compact_line(by_pane["p6"], 60)   # cline badge
+    assert "π" in mod.compact_line(by_pane["p8"], 60)    # omp badge in place
+
+
+def test_build_columns_shows_every_agent_kind_of_a_pane():
+    """Two agent kinds in one pane render two columns; the card leads its own."""
+    panes = [{"pane_id": "p1", "tab_id": "t1", "agent_status": "unknown",
+              "cwd": "/x", "terminal_title_stripped": "> - set the default"}]
+    cards = {"p1": {"pane_id": "p1", "tab_id": "t1", "agent": "cline",
+                    "header": "earth", "status": "editing board.py",
+                    "updated": 990.0}}
+    tabs = [{"tab_id": "t1", "label": "earth"}]
+    cols = mod.build_columns([], cards, 1000.0, 600, tabs=tabs, panes=panes,
+                             pane_agents={"p1": [
+                                 {"agent": "omp", "pid": 5, "rss": 4096},
+                                 {"agent": "cline", "pid": 7, "rss": 100}]})
+    by_pane = {c["pane"]: c for c in cols}
+    assert set(by_pane) == {"p1", "p1#omp"}
+    assert by_pane["p1"]["agent"] == "cline"      # the card's agent leads
+    assert by_pane["p1"]["text"] == "editing board.py"
+    assert by_pane["p1"]["pid"] == 7
+    assert by_pane["p1"]["age"] == 10.0
+    assert by_pane["p1#omp"]["agent"] == "omp"
+    assert by_pane["p1#omp"]["pid"] == 5 and by_pane["p1#omp"]["rss"] == 4096
+    assert by_pane["p1#omp"]["text"] == "" and by_pane["p1#omp"]["age"] is None
+
+
 def test_build_columns_hides_herdr_cards_without_a_live_pane():
     """A herdr card whose pane is gone renders no column at all."""
     cards = {"p1": {"pane_id": "p1", "herdr": True, "status": "stale"}}
@@ -787,6 +930,15 @@ def test_sweep_drops_only_truly_dead_panes(state: Path):
     mod.save_card({"pane_id": "ext-tty1", "herdr": False})
     mod.sweep(mod.load_cards(), [], [], [])
     assert "ext-tty1" in mod.load_cards()
+    # a live pane whose recorded herdr tab is gone: the tab check removes it
+    mod.save_card({"pane_id": "p3", "herdr": True, "tab_id": "t1"})
+    mod.sweep(mod.load_cards(), [], [{"tab_id": "t9"}],
+              [{"pane_id": "p3", "tab_id": "t9"}])
+    assert "p3" not in mod.load_cards()
+    # no live tab list at all (older snapshot): the live pane is enough
+    mod.save_card({"pane_id": "p4", "herdr": True, "tab_id": "t1"})
+    mod.sweep(mod.load_cards(), [], [], [{"pane_id": "p4", "tab_id": "t1"}])
+    assert "p4" in mod.load_cards()
 
 
 def test_gather_columns_refreshes_and_sweeps(state: Path,

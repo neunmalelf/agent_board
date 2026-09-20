@@ -6,6 +6,79 @@
 > alternatives. Rules: see `.agentrules` (History Rule) and
 > `docs/development.md`.
 
+## 2.7.20260920144525Z - 2026-09-20
+
+Follow-up to the 2.5 agent-pane work, reported against the live session
+(6 tabs, 20 panes, herdr 0.8.2): "in herdr tab: earth are currently running
+two agents, but only one is shown" - and "we need a symbol for cline".
+
+Reproduced live. The `earth` tab (`w1:t1Z`) hosts three panes: `w1:p6A`
+(herdr-classified `omp`) and `w1:p68`, where the second agent lives *nested*:
+
+    w1:p68 shell 3803349 (pts/30) -> mc 3962741 (foreground process)
+      -> bash 3962743 (/bin/bash --rcfile .bashrc)
+      -> cline 4010057 (node .../bin/cline, own pts/28)
+
+`herdr pane process-info --pane w1:p68` reports only `mc` in
+`foreground_processes`, and the 2.5 probe matched that list by process `name`
+only. `mc` is not a known agent kind, so the pane produced no column and the
+tab showed a single agent; the cline pane also never showed its (documented,
+tested) `CL` badge.
+
+Fix:
+
+- **The probe follows the pane's process tree.** `pane_agents()` walks the
+  `/proc` descendants of the pane's foreground processes
+  (`child_pids()`/`proc_tree()`, bounded by `MAX_TREE_PROCS`) and matches an
+  agent by process name *and* by argv (`proc_kind()`: argv[0], argv[1], and
+  any token containing a path, with `AGENT_ARG_SUFFIXES` stripped) - so
+  `node-MainThread` running `.../bin/cline`, `mc` wrapping a nested terminal
+  agent, and plain `omp` all resolve. Verified live: `w1:p68` now reports
+  `cline` (pid 4010065 / 1.3 GB) and the board renders the earth tab as two
+  columns, `CL > - set the default also to 30s` and `π Optimize without
+  changing`. The probe costs ~0.10 s for the 16 unclassified panes of the
+  session.
+- **One entry per agent kind.** `pane_agents()` groups the tree by kind and
+  keeps the largest-RSS process of each, so an mc pane hosting two different
+  agents (mc-embedded terminals are separate agent sessions) is no longer
+  reduced to one column. `build_columns()` renders the extras under
+  `<pane>#<kind>` and lets the kind that posted the card lead its column;
+  `pane_agent()` remains the largest-entry wrapper for `note register`.
+- **Tab liveness before every refresh, made explicit.** `sweep()` now also
+  drops a herdr card whose recorded tab is missing from a non-empty live tab
+  list (`live_tabs and tab and tab not in live_tabs`), instead of only
+  reacting to a vanished pane. Verified against the live snapshot first:
+  every pane's `tab_id` and every agent's `tab_id` are present in `tabs`, so
+  the check cannot hide a live agent; a snapshot without a tab list keeps
+  everything.
+- **30 s default re-verified** (all modes) - no code change: argparse
+  default, bash `view`/`view-compact`, `_run`, and the systemd `serve` unit
+  all refresh every 30 s; `test_build_parser_default_refresh_is_30s` pins it.
+
+Tests 65 → 79 (probe tree/argv matrix, nested wrapper, per-kind columns, the
+earth shape, tab-liveness sweep). Found and fixed while editing the suite:
+`test_self_pane_id_prefers_env` had lost its `def` line, so its assertions
+ran at the end of the preceding test and `self_pane_id` was not a test of its
+own.
+
+Rejected alternatives:
+
+- Matching the pane's `cwd` or the agent's tty instead of the process tree:
+  the live cline agent runs on its own pts (`/dev/pts/28`) because `mc`
+  embeds a terminal for it, and its cwd differs from the pane's - only the
+  parent chain ties it to the pane.
+- Walking the descendants of the pane's *shell* as well: that would surface
+  deliberately backgrounded agents of a pane as columns; the foreground tree
+  covers the wrapper case that was actually missed, and background agents
+  still announce themselves through a posted card.
+- Replacing the `CL` badge with a glyph: `CL` is documented, tested, and
+  consistent with `AG`/`OC`/`FB`; the real defect was that the earth cline
+  pane was never detected, so the badge had nothing to decorate.
+- Matching every argv token: a token like `cline.md` (`vim cline.md`,
+  `grep cline`) would fabricate columns; only argv[0], argv[1], and
+  path-bearing tokens are considered, and a suffix that is not a known code
+  extension stays unmatched.
+
 ## 2.6.20260920141919Z - 2026-09-20
 
 Follow-up to 2.5, requested right after it: once every agent pane gets a

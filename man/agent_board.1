@@ -15,8 +15,11 @@ source of truth for liveness (a column disappears the moment its pane closes).
 Before every refresh the board re-reads that snapshot and drops the columns
 whose pane or tab is gone. Every agent pane of a tab gets its own column, so
 one tab can show several agents side by side, including agents herdr did not
-classify (found as known agent processes in the pane, or via their own status
-card). Columns are colored: green while working, yellow while
+classify (found as known agent processes in the pane's process tree, matched
+by process name and argv - so an agent started inside a wrapper such as
+\\fBmc\\fR counts too - or via their own status card). A pane running several
+agent kinds renders one column per kind.
+Columns are colored: green while working, yellow while
 waiting for input, red when stopped by a rate/quota limit, cyan when idle.
 .PP
 Run \fBagent_board\fR (the wrapper) for the fullscreen TUI and service

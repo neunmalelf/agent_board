@@ -5,7 +5,33 @@ All notable changes, newest first. Versions are
 `src/agent_board/` `__version__`). Detailed reasoning, decisions, and
 release notes live in `history.md`; user-facing highlights in `NEWS.md`.
 
-## 2.6.20260920141919Z - 2026-09-20
+## 2.7.20260920144525Z - 2026-09-20
+
+- The pane probe follows the pane's process tree: `read_proc()`,
+  `child_pids()`, `proc_tree()` (bounded by `MAX_TREE_PROCS` 64) and
+  `proc_kind()` (process name plus argv tokens, `AGENT_ARG_SUFFIXES`
+  stripped) replace the name-only lookup. `pane_agents()` returns one entry
+  per agent kind in the pane, largest RSS first; `pane_agent()` stays as the
+  thin largest-entry wrapper used by `note register`.
+- `detect_pane_agents()` maps a pane to its entry list; new
+  `probe_entries()` normalizes the map value. `build_columns()` renders one
+  column per probed kind (extras keyed `<pane>#<kind>`) and lets the kind
+  that posted the card lead; `card_chip()` factors the done/stopped/input
+  precedence out of the agent and pane loops.
+- `sweep()` also drops a herdr card whose recorded tab is missing from a
+  non-empty live tab list, so a closed tab leaves the view even while its
+  pane is still listed. External cards stay untouched.
+- Tests 65 → 79: `proc_kind` matrix, `proc_tree` walk/limit/real-/proc,
+  nested-agent probe, one entry per kind, `probe_entries`, per-kind columns,
+  the live earth shape (omp plus cline behind mc with its `CL` badge), and
+  the tab-liveness sweep cases. `test_self_pane_id_prefers_env` got its lost
+  `def` line back (its asserts had silently run inside the previous test).
+- README (tab coverage + removal bullets), `man/agent_board.1`,
+  `tldr/agent_board.md`, `NEWS.md`. Live check: `--once` renders the earth
+  tab as two columns (`CL > - set the default also to 30s`, `π Optimize
+  without changing`); the probe costs ~0.10 s for 16 unclassified panes.
+
+
 
 - Step trails are opt-in: `column_lines()`, `render_frame()`,
   `render_once()`, `run_tui()`, and `run_serve()` take `trail=False` by

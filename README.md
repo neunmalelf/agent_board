@@ -95,8 +95,12 @@ Each live agent gets one column:
 - **Tab coverage** = every agent pane gets a column, so one herdr tab can
   show several agents side by side. A pane qualifies when herdr classified
   its agent, when a card was posted for it, or when a known agent process
-  runs in its foreground (`herdr pane process-info`, so cline/freebuff
-  instances herdr did not classify still appear, with pid/mem). Tabs
+  runs in its process tree (`herdr pane process-info` plus the /proc
+  descendants of those foreground processes, matched by process name and by
+  argv) - so cline/freebuff instances herdr did not classify still appear,
+  with pid/mem, including one started inside a wrapper such as `mc` or a
+  node/python launcher. A pane running several agent kinds renders one
+  column per kind (`<pane>#<kind>` for the extra ones). Tabs
   without any agent get one fallback column rendered as
   `(? unknown) <tab label>` with no meta beyond the tab id, so tabs like
   `mediadownloader_webui` never vanish from the board. Agents outside
@@ -105,10 +109,10 @@ Each live agent gets one column:
   `herdr pane report-agent <pane> --source custom:<name> --agent <kind>
   --state working|idle|blocked` - after which they render like any other
   column, including pid/mem resolution and their `AGENT_BADGE` badge.
-  Un-classified tabs that merely run non-agent processes stay
-  `(? unknown)` by design. Processes that only run in the background of a
-  pane (or headless, without a pane at all) are not in that probe's
-  foreground list; those agents show up when they post a card.
+  Un-classified panes that merely run non-agent processes stay
+  `(? unknown)` by design. Processes outside the probed tree (for example
+  an agent in the background of a pane) are not found by that probe; those
+  agents show up when they post a card.
 - **pid + mem** - resolved per agent from `/proc` (herdr's snapshot carries
   no pid): matched by agent-kind alias + cwd, external cards by their pts
   tty.
@@ -117,8 +121,9 @@ Each live agent gets one column:
   by default so the board stays on the status lines.
 - **Removal**: before every refresh the snapshot is re-read; a column
   disappears as soon as its pane is gone, and a herdr-owned card is swept
-  once neither its pane nor its tab exists any more (a card whose pane
-  herdr never classified survives while its tab stays open). Agents
+  once its pane is gone or its recorded tab is no longer an active herdr
+  tab (a card whose pane herdr never classified survives while its tab
+  stays open). Agents
   outside herdr post with an `ext-*` id; their column drops on
   `note stop` or after `--stale-seconds` (600).
 

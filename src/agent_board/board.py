@@ -17,7 +17,10 @@ is the source of truth for liveness: a column disappears the moment its pane
 (and with it its tab) closes. Every agent pane of a tab gets its own column,
 so one tab can show several agents side by side: herdr-classified agents,
 agents that only posted a card, and known agent processes found in the pane's
-foreground (herdr pane process-info) even when herdr did not classify them.
+process tree (herdr pane process-info plus its /proc descendants) even when
+herdr did not classify them - including an agent started inside a wrapper
+(a node/python launcher or a terminal tool such as mc). A pane hosting several
+agent kinds shows one column per kind.
 Cards carry the free-text progress ("what is it doing", "what has it done").
 Agents outside herdr get a column too; it disappears on `note stop` or after
 --stale-seconds without an update.
@@ -39,7 +42,7 @@ import sys
 import time
 from datetime import datetime
 
-__version__ = "2.6.20260920141919Z"
+__version__ = "2.7.20260920144525Z"
 
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
@@ -62,6 +65,11 @@ MAX_LOG = 24
 MAX_HEADER = 80
 MAX_MSG = 200
 SPINNER_RE = re.compile(r"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]")
+# Agents started through an interpreter or a wrapper are matched by argv too
+# ("node /home/.../bin/cline"), so these suffixes are stripped from a token.
+AGENT_ARG_SUFFIXES = (".js", ".mjs", ".cjs", ".ts", ".py", ".exe")
+# Upper bound of /proc entries read per probed pane (foreground tree walk).
+MAX_TREE_PROCS = 64
 
 
 def clean_title(text: str) -> str:
@@ -298,6 +306,110 @@ def pid_rss(pid: int | None) -> int | None:
     except (OSError, ValueError, IndexError):
         return None
     return None
+
+
+def read_proc(pid: int) -> dict | None:
+    """Read one process's name and argv from /proc.
+
+    usage: read_proc <PID>
+    returns: {"name", "pid", "argv"}, or None when the pid has no readable entry.
+
+    Args:
+        pid (int): Process id to read.
+
+    Example:
+        read_proc(os.getpid())
+    """
+    try:
+        with open(f"/proc/{pid}/comm") as fh:
+            name = fh.read().strip()
+        with open(f"/proc/{pid}/cmdline", "rb") as fh:
+            argv = [a.decode("utf-8", "replace")
+                    for a in fh.read().split(b"\0") if a]
+    except OSError:
+        return None
+    return {"name": name, "pid": pid, "argv": argv}
+
+
+def child_pids(pid: int) -> list[int]:
+    """List the direct children of a process, read from /proc.
+
+    usage: child_pids <PID>
+    returns: Child pids in file order; empty when the pid or its children are gone.
+
+    Args:
+        pid (int): Parent process id.
+
+    Example:
+        child_pids(os.getpid())
+    """
+    kids: list[int] = []
+    for path in glob.glob(f"/proc/{pid}/task/*/children"):
+        try:
+            with open(path) as fh:
+                kids += [int(x) for x in fh.read().split() if x.isdigit()]
+        except (OSError, ValueError):
+            continue
+    return kids
+
+
+def proc_tree(pids: list, limit: int = MAX_TREE_PROCS) -> list[dict]:
+    """Read the given processes plus all of their descendants.
+
+    usage: proc_tree <PIDS> [LIMIT]
+    returns: Process dicts (name, pid, argv) breadth-first, roots first, at
+        most `limit` entries; vanished processes are skipped.
+
+    Args:
+        pids (list): Root pids, e.g. a pane's foreground processes.
+        limit (int, optional): Maximum number of processes to read. Defaults
+            to MAX_TREE_PROCS.
+
+    Example:
+        tree = proc_tree([p.get("pid") for p in procs])
+    """
+    out: list[dict] = []
+    seen: set[int] = set()
+    queue = [int(p) for p in pids if isinstance(p, int) and p]
+    while queue and len(out) < limit:
+        pid = queue.pop(0)
+        if pid in seen:
+            continue
+        seen.add(pid)
+        proc = read_proc(pid)
+        if proc is None:
+            continue
+        out.append(proc)
+        queue += [k for k in child_pids(pid) if k not in seen]
+    return out
+
+
+def proc_kind(proc: dict) -> str:
+    """Agent kind of one process, matched by its name and by its argv.
+
+    Args:
+        proc: Process dict from herdr pane process-info or read_proc().
+
+    Returns:
+        The agent kind from AGENT_KIND_BY_NAME, or "" when neither the process
+        name nor an interpreter/wrapper argument names a known agent binary -
+        "node /home/fmann/.local/bin/cline" resolves through its argv, and an
+        agent binary path anywhere in argv wins over an unknown wrapper name.
+
+    Example:
+        proc_kind({"name": "node-MainThread", "argv": ["node", "/opt/bin/cline"]})
+    """
+    argv = [str(a) for a in proc.get("argv") or []]
+    tokens = [str(proc.get("name") or "")] + argv[:2]
+    tokens += [a for a in argv if "/" in a]
+    for token in tokens:
+        base = os.path.basename(token).lower()
+        if base.endswith(AGENT_ARG_SUFFIXES):
+            base = base.rsplit(".", 1)[0]
+        kind = AGENT_KIND_BY_NAME.get(base)
+        if kind:
+            return kind
+    return ""
 
 
 def herdr_match(agents: list | None, pane_id: str, tab_id: str) -> dict | None:
@@ -610,12 +722,50 @@ def resolve_ext_proc(pane_id: str, procs: tuple | None) -> tuple[int | None, int
     return (best[0], best[2]) if best else (None, None)
 
 
-def pane_agent(herdr_bin: str, pane_id: str) -> tuple[str, int | None, int | None]:
-    """Find the agent process of a pane, whether herdr classified it or not.
+def pane_agents(herdr_bin: str, pane_id: str) -> list[dict]:
+    """Find every known agent process running in one herdr pane.
 
     Args:
         herdr_bin: Path or name of the herdr binary to query.
-        pane_id: Pane whose foreground processes should be checked.
+        pane_id: Pane whose foreground processes and their /proc descendants
+            are checked, so an agent started inside a wrapper (a launcher or a
+            terminal tool such as mc) is found as well.
+
+    Returns:
+        One {"agent", "pid", "rss"} entry per agent kind found, largest RSS
+        first; [] when no known agent runs in the pane.
+
+    Example:
+        pane_agents("herdr", "w1:p68")
+    """
+    procs = herdr_pane_processes(herdr_bin, pane_id)
+    if not procs:
+        return []
+    tree: list[dict] = list(procs)
+    known = {p.get("pid") for p in procs}
+    tree += [p for p in proc_tree([p.get("pid") for p in procs])
+             if p["pid"] not in known]
+    best: dict = {}
+    for proc in tree:
+        kind = proc_kind(proc)
+        if not kind:
+            continue
+        pid = proc.get("pid")
+        pid = pid if isinstance(pid, int) else None
+        rss = pid_rss(pid)
+        if kind not in best or (rss or 0) > (best[kind]["rss"] or 0):
+            best[kind] = {"agent": kind, "pid": pid, "rss": rss}
+    entries = list(best.values())
+    entries.sort(key=lambda e: e["rss"] or 0, reverse=True)
+    return entries
+
+
+def pane_agent(herdr_bin: str, pane_id: str) -> tuple[str, int | None, int | None]:
+    """Find the largest agent process of a pane, whether herdr classified it.
+
+    Args:
+        herdr_bin: Path or name of the herdr binary to query.
+        pane_id: Pane whose process tree is checked.
 
     Returns:
         (kind, pid, rss_kb) of the largest known agent process running in the
@@ -624,17 +774,11 @@ def pane_agent(herdr_bin: str, pane_id: str) -> tuple[str, int | None, int | Non
     Example:
         kind, pid, rss = pane_agent("herdr", "w1:p68")
     """
-    best: tuple[str, int | None, int | None] | None = None
-    for proc in herdr_pane_processes(herdr_bin, pane_id):
-        kind = AGENT_KIND_BY_NAME.get(str(proc.get("name") or "").lower())
-        if not kind:
-            continue
-        pid = proc.get("pid")
-        pid = pid if isinstance(pid, int) else None
-        rss = pid_rss(pid)
-        if best is None or (rss or 0) > (best[2] or 0):
-            best = (kind, pid, rss)
-    return best or ("", None, None)
+    found = pane_agents(herdr_bin, pane_id)
+    if not found:
+        return "", None, None
+    top = found[0]
+    return str(top["agent"]), top["pid"], top["rss"]
 
 
 def detect_pane_agents(herdr_bin: str, panes: list, agents: list | None) -> dict:
@@ -646,8 +790,9 @@ def detect_pane_agents(herdr_bin: str, panes: list, agents: list | None) -> dict
         agents: Snapshot agent dicts; herdr-classified panes are skipped.
 
     Returns:
-        {pane_id: {"agent": kind, "pid": pid, "rss": rss_kb}} for every
-        unclassified pane that runs a known agent process, else {}.
+        {pane_id: [{"agent", "pid", "rss"}, ...]} for every unclassified pane
+        that runs at least one known agent process, else {}. A pane hosting
+        several agent kinds reports one entry per kind, largest RSS first.
 
     Example:
         found = detect_pane_agents("herdr", panes, agents)
@@ -658,10 +803,55 @@ def detect_pane_agents(herdr_bin: str, panes: list, agents: list | None) -> dict
         pane = str(p.get("pane_id"))
         if not pane or pane in classified:
             continue
-        kind, pid, rss = pane_agent(herdr_bin, pane)
-        if kind:
-            found[pane] = {"agent": kind, "pid": pid, "rss": rss}
+        entries = pane_agents(herdr_bin, pane)
+        if entries:
+            found[pane] = entries
     return found
+
+
+def probe_entries(found: object) -> list[dict]:
+    """Normalize one pane's probe result into a list of agent entries.
+
+    usage: probe_entries <FOUND>
+    returns: The entries as a list; a single entry dict is wrapped, and
+        None or any other value yields [].
+
+    Args:
+        found (object): Value of the pane_agents map for one pane: a list of
+            entries, a single entry dict, or None.
+
+    Example:
+        probe_entries({"agent": "cline", "pid": 7, "rss": 128})
+    """
+    if isinstance(found, dict):
+        return [found]
+    if isinstance(found, list):
+        return [e for e in found if isinstance(e, dict)]
+    return []
+
+
+def card_chip(card: dict, fallback: str) -> str:
+    """Chip state of a card, falling back to a herdr status.
+
+    usage: card_chip <CARD> <FALLBACK>
+    returns: "done"/"stopped"/"input" when the card says so, else fallback,
+        else "unknown".
+
+    Args:
+        card (dict): Card mapping with optional done/stopped/input flags.
+        fallback (str): herdr status ("working", "idle", ...) used when the
+            card carries no flag.
+
+    Example:
+        card_chip({"input": True}, "working")
+    """
+    if card.get("done"):
+        return "done"
+    if card.get("stopped"):
+        return "stopped"
+    if card.get("input"):
+        return "input"
+    return fallback or "unknown"
 
 
 # --------------------------------------------------------------------------
@@ -684,8 +874,9 @@ def build_columns(agents: list | None, cards: dict, now: float, stale_after: flo
             column (agent kind unknown) so no herdr tab can go missing.
         panes: Snapshot pane list; panes without a herdr-classified agent but
             with a card or a probed agent process of their own get a column,
-            so a tab can show every agent running in it.
-        pane_agents: {pane_id: {"agent", "pid", "rss"}} from
+            so a tab can show every agent running in it - one column per agent
+            kind found in the pane.
+        pane_agents: {pane_id: [{"agent", "pid", "rss"}, ...]} from
             detect_pane_agents() for the panes herdr did not classify.
 
     Returns:
@@ -713,10 +904,7 @@ def build_columns(agents: list | None, cards: dict, now: float, stale_after: flo
             "tab": tab,
             "tab_name": labels.get(tab, ""),
             "header": header[:MAX_HEADER],
-            "chip": ("done" if card.get("done")
-                     else "stopped" if card.get("stopped")
-                     else "input" if card.get("input")
-                     else (a.get("agent_status") or "unknown")),
+            "chip": card_chip(card, str(a.get("agent_status") or "unknown")),
             "focused": bool(a.get("focused")),
             "text": status_text(card, now),
             "log": card.get("log") or [],
@@ -730,34 +918,39 @@ def build_columns(agents: list | None, cards: dict, now: float, stale_after: flo
         if not pane or pane in covered:
             continue  # herdr already classified this pane, or it is empty
         card = cards.get(pane) or {}
-        found = (pane_agents or {}).get(pane) or {}
-        kind = card.get("agent") or found.get("agent") or ""
-        if not card and not kind:
+        probed = probe_entries((pane_agents or {}).get(pane))
+        if not card and not probed:
             continue  # plain shell or tool pane: not an agent
+        card_kind = str(card.get("agent") or "")
+        if card_kind:
+            # the agent that posted the card leads its column
+            probed.sort(key=lambda e: str(e.get("agent")) != card_kind)
         header = (card.get("header")
                   or clean_title(p.get("terminal_title_stripped")
                                  or p.get("terminal_title") or "")
                   or p.get("cwd") or pane)
-        pid, rss = found.get("pid"), found.get("rss")
-        if pid is None and kind:
-            pid, rss = resolve_proc(kind, str(p.get("cwd") or ""), procs)
         tab = str(p.get("tab_id") or card.get("tab_id") or "")
-        cols.append({
-            "pane": pane,
-            "agent": kind,
-            "tab": tab,
-            "tab_name": labels.get(tab, ""),
-            "header": header[:MAX_HEADER],
-            "chip": ("done" if card.get("done")
-                     else "stopped" if card.get("stopped")
-                     else "input" if card.get("input")
-                     else (p.get("agent_status") or "unknown")),
-            "focused": bool(p.get("focused")),
-            "text": status_text(card, now),
-            "log": card.get("log") or [],
-            "age": (now - card["updated"]) if card.get("updated") else None,
-            "pid": pid, "rss": rss,
-        })
+        entries = probed or [{"agent": card_kind, "pid": None, "rss": None}]
+        for i, e in enumerate(entries):
+            kind = str(e.get("agent") or card_kind)
+            pid, rss = e.get("pid"), e.get("rss")
+            if pid is None and kind:
+                pid, rss = resolve_proc(kind, str(p.get("cwd") or ""), procs)
+            cols.append({
+                # a second agent kind in the same pane gets a derived column id
+                "pane": pane if i == 0 else f"{pane}#{kind}",
+                "agent": kind,
+                "tab": tab,
+                "tab_name": labels.get(tab, ""),
+                "header": header[:MAX_HEADER],
+                "chip": card_chip(card, str(p.get("agent_status") or "unknown")),
+                "focused": bool(p.get("focused")),
+                "text": status_text(card, now) if i == 0 else "",
+                "log": (card.get("log") or []) if i == 0 else [],
+                "age": ((now - card["updated"])
+                        if i == 0 and card.get("updated") else None),
+                "pid": pid, "rss": rss,
+            })
 
     seen = {c["pane"] for c in cols}
     for pane, card in cards.items():
@@ -814,14 +1007,15 @@ def build_columns(agents: list | None, cards: dict, now: float, stale_after: flo
 
 def sweep(cards: dict, agents: list | None, tabs: list | None = None,
           panes: list | None = None) -> None:
-    """Delete cards whose herdr pane (and tab) has closed.
+    """Delete cards whose herdr tab or pane has closed.
 
     Args:
         cards: Cards keyed by pane_id, as returned by load_cards().
         agents: Live herdr agent dicts; None disables sweeping because the
             snapshot is unreachable.
-        tabs: Live snapshot tab dicts; a card whose pane is unknown to herdr
-            survives while its tab is still open.
+        tabs: Live snapshot tab dicts; a card whose recorded tab is no longer
+            among them drops even while its pane is still listed, so a closed
+            herdr tab leaves the view on the next refresh.
         panes: Live snapshot pane dicts; when present, pane liveness is
             authoritative and a vanished pane drops its card.
 
@@ -838,16 +1032,21 @@ def sweep(cards: dict, agents: list | None, tabs: list | None = None,
         live_panes |= {str(p.get("pane_id")) for p in panes if p.get("pane_id")}
     live_tabs = {str(t.get("tab_id")) for t in tabs or [] if t.get("tab_id")}
     for pane, card in cards.items():
-        if not card.get("herdr") or pane in live_panes:
-            continue
+        if not card.get("herdr"):
+            continue  # external card: herdr does not own it
         tab = str(card.get("tab_id") or "")
+        if live_tabs and tab and tab not in live_tabs:
+            drop_card(pane)  # its herdr tab is gone: out of the view
+            continue
+        if pane in live_panes:
+            continue
         if not panes and tab and tab in live_tabs:
             continue  # no pane list in this snapshot: its live tab is enough
         drop_card(pane)
 
 
 def gather_columns(herdr_bin: str, now: float, stale_after: float) -> tuple[list, bool]:
-    """Refresh the whole board: snapshot, sweep, pane probe, then merge.
+    """Refresh the whole board: snapshot, liveness sweep, probe, then merge.
 
     Args:
         herdr_bin: Path or name of the herdr binary to query.

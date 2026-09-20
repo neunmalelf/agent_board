@@ -45,7 +45,9 @@ journalctl --user -u agent_board -f
 - The column header is the agent's herdr tab title, captured at register.
 - Every agent pane gets a column: one tab can show several agents side by
   side (herdr-classified ones, panes that posted a card, and known agent
-  processes found in the pane, e.g. an unclassified cline or freebuff).
+  processes found in the pane's process tree by name or argv, e.g. an
+  unclassified cline or freebuff, even inside a wrapper like `mc`). A pane
+  hosting several agent kinds gets one column per kind.
   Tabs without any agent show as `? unknown`.
 - Refresh (TUI, `--once`, service frame) defaults to 30 s:
   `--poll-period` / `--autorefresh SECONDS` overrides it (minimum 1).

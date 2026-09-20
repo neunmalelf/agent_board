@@ -3,6 +3,21 @@
 User-visible highlights per release. Full details: `ChangeLog.md`;
 decisions and reasoning: `history.md` (newest on top).
 
+## 2.7 (2026-09-20)
+
+- **Agents behind a wrapper are no longer invisible**: the pane probe now
+  follows the pane's process tree and matches an agent by process name *and*
+  by argv, so an agent started inside `mc`, a node/python launcher, or any
+  other wrapper gets its own column with pid and memory. In the live session
+  the `earth` tab ran two agents (omp and a cline behind `mc`) but showed
+  only one; both are rendered now, the cline column carrying its `CL` badge.
+- **Every agent of a pane is listed**: a pane that hosts several agent kinds
+  shows one column per kind (the extra ones are keyed `<pane>#<kind>`), and
+  the agent that posted a status card leads its column.
+- **Closed herdr tabs leave the view on the next refresh**: a card is swept
+  as soon as its recorded tab is no longer an active herdr tab, not only
+  when its pane disappeared from the snapshot.
+
 ## 2.6 (2026-09-20)
 
 - **Quieter board**: a column now shows its current status line only - the
