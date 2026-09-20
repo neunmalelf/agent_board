@@ -145,7 +145,7 @@ the TUI: `agent_board.py --once`.
 For the interactive board (`agent_board view` / `agent_board view-compact`),
 clicking a column focuses its herdr tab (`herdr tab focus`); every line
 is numbered - type the number, Enter jumps to that tab (Esc cancels).
-q quits, j/k scroll.
+q or Ctrl+C quits (curses restores the terminal, exit code 0), j/k scroll.
 
 ### Tests
 

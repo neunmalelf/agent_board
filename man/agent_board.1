@@ -28,6 +28,8 @@ management; \fBagent_board.py \-\-once\fR prints a single frame.
 In the fullscreen and compact board, clicking a column focuses its herdr
 tab (\fBherdr tab focus\fR). Each info line is numbered; typing the
 number and Enter focuses that tab without the mouse (Esc cancels).
+\\fBq\\fR or Ctrl+C quits: curses restores the terminal and the exit
+code stays 0.
 .SH OPTIONS
 .TP
 .B \-\-once
@@ -83,7 +85,7 @@ step/update.
 Remove your column (only needed outside herdr).
 .SH EXAMPLES
 .TP
-Fullscreen board (q quits, j/k scrolls)
+Fullscreen board (q or Ctrl+C quits, j/k scrolls)
 .B agent_board.py
 .TP
 Print a single frame

@@ -5,6 +5,22 @@ All notable changes, newest first. Versions are
 `src/agent_board/` `__version__`). Detailed reasoning, decisions, and
 release notes live in `history.md`; user-facing highlights in `NEWS.md`.
 
+## 2.8.20260920145442Z - 2026-09-20
+
+- Ctrl+C in the fullscreen TUI no longer prints a `KeyboardInterrupt`
+  traceback: `run_tui()` catches it around `getch()` (and treats the ETX key
+  3 like `q`), `main()` catches it around `curses.wrapper()` and the
+  `serve` loop, so both exit 0 with the terminal restored. The footer and
+  the `man`/`tldr`/README key lists say `q/Ctrl+C quit`.
+- `run_serve()` creates the frame file's directory (`os.makedirs` on
+  `dirname(frame_path)`) instead of crashing with `FileNotFoundError` on a
+  machine whose state directory does not exist yet (the systemd unit would
+  have restarted every 5 s until the first card was posted).
+- Tests 79 → 82: a pty test sends a real Ctrl+C into the TUI (fails on the
+  previous release with exit code -2), `run_serve` writes into a missing
+  frame directory and ends on Ctrl+C, and `main()` returns 0 for an
+  interrupted `serve`, TUI, and `--once`.
+
 ## 2.7.20260920144525Z - 2026-09-20
 
 - The pane probe follows the pane's process tree: `read_proc()`,

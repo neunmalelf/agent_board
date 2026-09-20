@@ -1414,6 +1414,99 @@ def test_column_at_click_fullscreen_mapping():
     assert mod.column_at_click({}, 5, 0, False, 48) is None
 
 
+def test_run_serve_creates_the_frame_dir_and_writes_a_frame(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """run_serve writes into a fresh state dir and a Ctrl+C ends the loop.
+
+    Args:
+        tmp_path: pytest temporary directory used as the missing frame parent.
+        monkeypatch: pytest fixture stubbing the column gatherer and sleep.
+    """
+    frame = tmp_path / "fresh" / "state" / "board.txt"
+    monkeypatch.setattr(mod, "gather_columns", lambda b, n, s: ([], True))
+    monkeypatch.setattr(mod.time, "sleep",
+                        mock.Mock(side_effect=KeyboardInterrupt))
+    with pytest.raises(KeyboardInterrupt):
+        mod.run_serve("herdr", 30.0, 600.0, str(frame))
+    assert frame.read_text().startswith("agent_board · 0 agents")
+
+
+def test_main_turns_ctrl_c_into_a_clean_exit(monkeypatch: pytest.MonkeyPatch):
+    """main() reports exit code 0 when the TUI, --once, or serve is interrupted.
+
+    Args:
+        monkeypatch: pytest fixture making each dispatch path raise Ctrl+C.
+    """
+
+    def interrupt(*args: object, **kwargs: object) -> None:
+        """Raise KeyboardInterrupt like a Ctrl+C would.
+
+        Args:
+            args: Positional arguments of the patched callable.
+            kwargs: Keyword arguments of the patched callable.
+
+        Raises:
+            KeyboardInterrupt: Always.
+        """
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(mod, "run_serve", interrupt)
+    assert mod.main(["serve"]) == 0
+    monkeypatch.setattr(mod.curses, "wrapper", interrupt)
+    assert mod.main([]) == 0
+    monkeypatch.setattr(mod, "gather_columns", interrupt)
+    assert mod.main(["--once"]) == 0
+
+
+def test_tui_ctrl_c_exits_cleanly(tmp_path: Path):
+    """Ctrl+C quits the board: exit code 0 and no traceback on stderr.
+
+    usage: test_tui_ctrl_c_exits_cleanly <TMP_PATH>
+    returns: None.
+
+    Args:
+        tmp_path (Path): pytest temporary directory for the fake herdr,
+            the redirected stderr, and the isolated board state.
+
+    Example:
+        test_tui_ctrl_c_exits_cleanly(Path("/tmp/pytest-ctrl-c"))
+    """
+    fake = tmp_path / "fake-herdr"
+    snap = json.dumps({"result": {"snapshot": {"agents": [], "tabs": [],
+                                               "panes": []}}})
+    fake.write_text("#!/bin/bash\n"
+                    "if [ \"$1\" = api ] && [ \"$2\" = snapshot ]; then\n"
+                    "    echo '" + snap + "'\nfi\n")
+    fake.chmod(0o755)
+    errfile = tmp_path / "err"
+
+    import pty
+    pid, fd = pty.fork()
+    if pid == 0:
+        env = dict(os.environ, XDG_STATE_HOME=str(tmp_path / "xdgstate"),
+                   TERM="xterm-256color", LINES="24", COLUMNS="80")
+        env.pop("HERDR_PANE_ID", None)
+        os.dup2(os.open(str(errfile), os.O_WRONLY | os.O_CREAT, 0o644), 2)
+        os.execve(str(MODULE_PATH),
+                  ["agent_board.py", "--herdr-bin", str(fake)], env)
+    time.sleep(1.5)
+    os.write(fd, b"\x03")                      # Ctrl+C in the TUI
+    status = None
+    deadline = time.time() + 8
+    while time.time() < deadline:
+        done, st = os.waitpid(pid, os.WNOHANG)
+        if done:
+            status = st
+            break
+        time.sleep(0.2)
+    if status is None:
+        os.kill(pid, 9)
+        os.waitpid(pid, 0)
+        pytest.fail("the TUI kept running after Ctrl+C")
+    assert os.waitstatus_to_exitcode(status) == 0
+    assert "Traceback" not in errfile.read_text()
+
+
 def test_tui_click_focuses_herdr_tab(tmp_path: Path):
     """The TUI focuses a herdr tab on both mouse click and number jump.
 

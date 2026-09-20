@@ -42,7 +42,7 @@ import sys
 import time
 from datetime import datetime
 
-__version__ = "2.7.20260920144525Z"
+__version__ = "2.8.20260920145442Z"
 
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
@@ -1552,14 +1552,19 @@ def run_tui(stdscr, herdr_bin: str, poll_period: float, stale_after: float,
                         row_map[y] = bi
                     y += 1
                 y += 1
-        foot = " q quit · ↑/↓ or j/k scroll · click column = focus tab "
+        foot = " q/Ctrl+C quit · ↑/↓ or j/k scroll · click column = focus tab "
         if focus_buf:
             foot = f" focus #{focus_buf} - Enter jumps, Esc cancels ·"
         stdscr.addnstr(h - 1, 0, foot, w - 1, curses.A_DIM)
         stdscr.refresh()
 
         stdscr.timeout(250)
-        key = stdscr.getch()
+        try:
+            key = stdscr.getch()
+        except KeyboardInterrupt:
+            return  # Ctrl+C quits the board; curses.wrapper restores the tty
+        if key == 3:
+            return  # a terminal handing Ctrl+C over as a key, not as SIGINT
         if key == curses.KEY_MOUSE:
             try:
                 _, mx, my, _, bstate = curses.getmouse()
@@ -1616,12 +1621,14 @@ def run_serve(herdr_bin: str, poll_period: float, stale_after: float,
         poll_period: Seconds between frame re-renders (minimum 1, enforced
             by main()).
         stale_after: External card age in seconds before the "stale" chip.
-        frame_path: Path of the frame file rewritten atomically each cycle.
+        frame_path: Path of the frame file rewritten atomically each cycle;
+            its directory is created when it does not exist yet.
         trail: Also write each column's step entries; off by default.
 
     Example:
         run_serve("herdr", 30.0, 600.0, FRAME_PATH)
     """
+    os.makedirs(os.path.dirname(frame_path) or ".", exist_ok=True)
     while True:
         cols, herdr_ok = gather_columns(herdr_bin, time.time(), stale_after)
         frame = render_frame(cols, herdr_ok=herdr_ok, color=False, trail=trail)
@@ -1635,7 +1642,8 @@ def run_serve(herdr_bin: str, poll_period: float, stale_after: float,
 # --------------------------------------------------------------------------
 
 HELP_EPILOG = """examples:
-  agent_board.py                             fullscreen TUI (q quits, j/k scrolls)
+  agent_board.py                             fullscreen TUI (q or Ctrl+C quits,
+                                             j/k scrolls)
   agent_board.py --trail                      TUI including the step trails
   agent_board.py --once                       print a single frame (for `watch`)
   agent_board.py --compact --once             one line per agent, two columns
@@ -1847,7 +1855,10 @@ def main(argv: list[str] | None = None) -> int:
         argv: Command-line arguments; None uses sys.argv[1:].
 
     Returns:
-        Process exit code: 0 on success, 2 on a missing -m/--msg.
+        Process exit code: 0 on success, 2 on a missing -m/--msg. A Ctrl+C
+        during the TUI or `serve` counts as a normal quit: curses has
+        restored the terminal, no traceback is printed, and the exit code
+        stays 0.
 
     Example:
         sys.exit(main(["note", "step", "-m", "todo 2/5"]))
@@ -1858,19 +1869,24 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_note(ns, ns.herdr_bin)
 
     if ns.cmd == "serve":
-        run_serve(shutil.which(ns.herdr_bin) or ns.herdr_bin,
-                  max(1.0, ns.poll_period), ns.stale_seconds, FRAME_PATH,
-                  ns.trail)
+        # Ctrl+C stops the frame writer without a traceback
+        with contextlib.suppress(KeyboardInterrupt):
+            run_serve(shutil.which(ns.herdr_bin) or ns.herdr_bin,
+                      max(1.0, ns.poll_period), ns.stale_seconds, FRAME_PATH,
+                      ns.trail)
         return 0
     herdr_bin = shutil.which(ns.herdr_bin) or ns.herdr_bin
-    if ns.once:
-        cols, herdr_ok = gather_columns(herdr_bin, time.time(),
-                                        ns.stale_seconds)
-        render_once(cols, herdr_ok=herdr_ok, compact=ns.compact, trail=ns.trail)
-        return 0
-    curses.wrapper(run_tui, herdr_bin,
-                   max(1.0, ns.poll_period), ns.stale_seconds, ns.compact,
-                   ns.trail)
+    # Ctrl+C quits the board; curses.wrapper already restored the terminal
+    with contextlib.suppress(KeyboardInterrupt):
+        if ns.once:
+            cols, herdr_ok = gather_columns(herdr_bin, time.time(),
+                                            ns.stale_seconds)
+            render_once(cols, herdr_ok=herdr_ok, compact=ns.compact,
+                        trail=ns.trail)
+            return 0
+        curses.wrapper(run_tui, herdr_bin,
+                       max(1.0, ns.poll_period), ns.stale_seconds, ns.compact,
+                       ns.trail)
     return 0
 
 

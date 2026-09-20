@@ -6,6 +6,70 @@
 > alternatives. Rules: see `.agentrules` (History Rule) and
 > `docs/development.md`.
 
+## 2.8.20260920145442Z - 2026-09-20
+
+Reported from the board: pressing Ctrl+C in the fullscreen TUI printed
+
+    Traceback (most recent call last):
+      File ".../board.py", line 1562, in run_tui
+        key = stdscr.getch()
+    KeyboardInterrupt
+
+`curses.wrapper` did restore the terminal, but the interrupt surfaced as an
+unhandled traceback and exit code 1, even though quitting the board is a
+normal user action.
+
+Fix:
+
+- `run_tui()` wraps `stdscr.getch()` in `try/except KeyboardInterrupt:
+  return` and also treats the ETX byte (key 3, a terminal that hands Ctrl+C
+  over as a key instead of raising SIGINT) like `q`, so the loop leaves
+  through the same path as a quit.
+- `main()` wraps the `curses.wrapper(run_tui, ...)` call and the
+  `run_serve(...)` call in `try/except KeyboardInterrupt: pass`, which
+  covers an interrupt raised *between* refreshes (for example inside the
+  `herdr api snapshot` subprocess) and the headless frame writer. Both paths
+  return 0 after curses restored the screen; no partial frame file is left,
+  because the frame is written to a `.tmp` file and `os.replace`d.
+- UI/docs: the footer reads `q/Ctrl+C quit`, and README, `tldr/agent_board.md`
+  and `man/agent_board.1` name Ctrl+C next to `q`.
+
+Verified: a pty test sends `\x03` into the running TUI - it exits 0 with an
+empty stderr (against the 2.7 code the same test fails with
+`waitstatus_to_exitcode(status) == -2`, i.e. the SIGINT death the user saw).
+`serve` was driven with a real SIGINT under a fresh `XDG_STATE_HOME`: exit 0,
+empty stderr, frame written.
+
+Second defect found while checking the `serve` path on a fresh state
+directory: `run_serve()` wrote its frame with `open(frame_path + ".tmp")`
+without creating the parent directory, so `agent_board.py serve` died with
+`FileNotFoundError: .../agent_board/board.txt.tmp` until some agent posted
+the first card (the systemd unit would have crash-looped every 5 s).
+`run_serve()` now runs `os.makedirs(os.path.dirname(frame_path) or ".",
+exist_ok=True)` once before its loop, pinned by the new
+`test_run_serve_creates_the_frame_dir_and_writes_a_frame`.
+
+Tests 79 → 82.
+
+Rejected alternatives:
+
+- Letting the traceback stand and documenting Ctrl+C as unsupported: quitting
+  a TUI with Ctrl+C is the expected reflex; a traceback after a clean
+  screen-restore is noise, and the exit code lied about it (1 instead of 0).
+- Exiting with 130 after handling the interrupt: the board treats Ctrl+C as
+  an alias for `q`, and the test suite (and the pty test) asserts a plain 0;
+  130 would have to be explained in every script that wraps the board.
+- Catching `KeyboardInterrupt` inside `run_serve()` and returning early: the
+  loop lives in `main()`'s dispatch, so one handler there covers `serve`,
+  the TUI, and `--once` in a single place.
+- Installing a SIGINT handler that only sets a flag: it would need the loop
+  to poll it in several places (getch, redraw, subprocess calls) for no gain
+  over the exception, which already unwinds to a safe point.
+- Fixing the doubled backslashes in `man/agent_board.1` (every roff escape
+  is written as `\\fB`, so `groff -man` renders a literal `\fB`): a
+  pre-existing, repo-wide man-source defect unrelated to this fix; it needs
+  its own commit rather than riding along with the Ctrl+C change.
+
 ## 2.7.20260920144525Z - 2026-09-20
 
 Follow-up to the 2.5 agent-pane work, reported against the live session

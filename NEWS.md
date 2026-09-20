@@ -3,6 +3,16 @@
 User-visible highlights per release. Full details: `ChangeLog.md`;
 decisions and reasoning: `history.md` (newest on top).
 
+## 2.8 (2026-09-20)
+
+- **Ctrl+C quits the board cleanly**: pressing Ctrl+C in the fullscreen TUI
+  no longer dumps a Python traceback - like `q` it leaves the board, curses
+  restores the terminal, and the exit code stays 0. The same applies to the
+  headless `serve` frame writer and to an interrupted `--once` frame.
+- **The service starts on a fresh machine**: `agent_board.py serve` creates
+  the state directory for its frame file instead of failing with
+  `FileNotFoundError` until the first agent posted a card.
+
 ## 2.7 (2026-09-20)
 
 - **Agents behind a wrapper are no longer invisible**: the pane probe now
